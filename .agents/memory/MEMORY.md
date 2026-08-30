@@ -1,0 +1,1 @@
+- [GitHub PAT write permissions](github-pat-write-permissions.md) — fine-grained tokens need target-repo Contents read/write for Git and Contents API pushes.

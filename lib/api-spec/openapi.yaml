@@ -1,0 +1,416 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: runtime
+    description: Colab runtime control operations
+  - name: assistant
+    description: AI assistant operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /runtime/status:
+    get:
+      operationId: getRuntimeStatus
+      tags: [runtime]
+      summary: Get the current Colab runtime status
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatus"
+  /runtime/bootstrap:
+    post:
+      operationId: createRuntimeBootstrap
+      tags: [runtime]
+      summary: Create a temporary Colab connector session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BootstrapInput"
+      responses:
+        "201":
+          description: Colab connector instructions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapResponse"
+  /runtime/disconnect:
+    post:
+      operationId: disconnectRuntime
+      tags: [runtime]
+      summary: Disconnect the active Colab runtime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionInput"
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatus"
+  /runtime/execute:
+    post:
+      operationId: executeRuntimeCode
+      tags: [runtime]
+      summary: Queue Python code for the connected Colab runtime
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteInput"
+      responses:
+        "202":
+          description: Code queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionResponse"
+  /runtime/interrupt:
+    post:
+      operationId: interruptRuntime
+      tags: [runtime]
+      summary: Ask the Colab runtime to interrupt execution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionInput"
+      responses:
+        "202":
+          description: Interrupt queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionResponse"
+  /runtime/events:
+    get:
+      operationId: getRuntimeEvents
+      tags: [runtime]
+      summary: Read runtime events after a cursor
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sessionId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Runtime event stream snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeEventsResponse"
+  /colab/connect:
+    post:
+      operationId: connectColabRuntime
+      tags: [runtime]
+      summary: Register a Colab connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectInput"
+      responses:
+        "200":
+          description: Connected runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatus"
+  /colab/events:
+    post:
+      operationId: postColabEvent
+      tags: [runtime]
+      summary: Post an event from the Colab connector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ColabEventInput"
+      responses:
+        "202":
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedResponse"
+  /colab/commands:
+    get:
+      operationId: getColabCommands
+      tags: [runtime]
+      summary: Fetch pending commands for the Colab connector
+      parameters:
+        - name: sessionId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pending connector commands
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ColabCommandsResponse"
+  /assistant/chat:
+    post:
+      operationId: sendAssistantMessage
+      tags: [assistant]
+      summary: Ask an AI provider to interpret a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantInput"
+      responses:
+        "200":
+          description: Assistant response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantResponse"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    BootstrapInput:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+      required:
+        - label
+    SessionInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          minLength: 8
+      required:
+        - sessionId
+    RuntimeStatus:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [offline, waiting, connected, busy, error]
+        sessionId:
+          type: ["string", "null"]
+        label:
+          type: ["string", "null"]
+        connectedAt:
+          type: ["string", "null"]
+        lastSeenAt:
+          type: ["string", "null"]
+        queuedCommands:
+          type: number
+        pythonVersion:
+          type: ["string", "null"]
+      required: [state, sessionId, label, connectedAt, lastSeenAt, queuedCommands, pythonVersion]
+    BootstrapResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        token:
+          type: string
+        connectorCode:
+          type: string
+        expiresAt:
+          type: string
+      required: [sessionId, token, connectorCode, expiresAt]
+    ConnectInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        token:
+          type: string
+        runtimeName:
+          type: string
+          maxLength: 120
+        pythonVersion:
+          type: string
+          maxLength: 80
+      required: [sessionId, token]
+    ExecuteInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        code:
+          type: string
+          minLength: 1
+          maxLength: 30000
+        description:
+          type: ["string", "null"]
+      required: [sessionId, code]
+    ExecutionResponse:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+        commandId:
+          type: string
+        message:
+          type: string
+      required: [accepted, commandId, message]
+    RuntimeEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [status, stdout, stderr, result, error, command, system]
+        message:
+          type: string
+        payload:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, type, message, payload, createdAt]
+    RuntimeEventsResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeEvent"
+        cursor:
+          type: string
+      required: [events, cursor]
+    ColabEventInput:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        token:
+          type: string
+        type:
+          type: string
+          enum: [status, stdout, stderr, result, error, system]
+        message:
+          type: string
+          maxLength: 30000
+        payload:
+          type: ["string", "null"]
+        commandId:
+          type: ["string", "null"]
+      required: [sessionId, token, type, message]
+    ColabCommand:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        description:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, code, description, createdAt]
+    ColabCommandsResponse:
+      type: object
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: "#/components/schemas/ColabCommand"
+      required: [commands]
+    AcceptedResponse:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+        message:
+          type: string
+      required: [accepted, message]
+    AssistantInput:
+      type: object
+      properties:
+        sessionId:
+          type: ["string", "null"]
+        message:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        provider:
+          type: string
+          enum: [openai, gemini, anthropic, openrouter, custom]
+        apiKey:
+          type: string
+          minLength: 1
+          maxLength: 500
+        model:
+          type: string
+          minLength: 1
+          maxLength: 120
+        execute:
+          type: boolean
+      required: [message, provider, apiKey, model, execute]
+    AssistantResponse:
+      type: object
+      properties:
+        reply:
+          type: string
+        code:
+          type: ["string", "null"]
+        commandId:
+          type: ["string", "null"]
+        provider:
+          type: string
+        model:
+          type: string
+      required: [reply, code, commandId, provider, model]
+

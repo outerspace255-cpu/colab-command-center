@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Colab Command Center"
+description = "A Gemini-like web control center for connecting to a Google Colab runtime, sending natural-language tasks, executing Python safely with confirmation, and streaming outputs, errors, charts, and files back to the browser."
+version = "1.0.0"
+id = "artifacts/colab-command-center"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21018
+
+[services.development]
+run = "pnpm --filter @workspace/colab-command-center run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/colab-command-center", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/colab-command-center/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21018"
+BASE_PATH = "/"

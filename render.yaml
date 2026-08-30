@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: colab-command-center
+    runtime: node
+    plan: free
+    buildCommand: pnpm install --frozen-lockfile && PORT=10000 BASE_PATH=/ pnpm run build
+    startCommand: NODE_ENV=production pnpm --filter @workspace/api-server run start
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
