@@ -10,6 +10,7 @@ export type AssistantInputPreference = typeof AssistantInputPreference[keyof typ
 
 
 export const AssistantInputPreference = {
+  ensemble: 'ensemble',
   primary: 'primary',
   fast: 'fast',
 } as const;
