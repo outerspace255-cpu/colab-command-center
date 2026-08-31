@@ -68,16 +68,9 @@ catalog:
 
 autoInstallPeers: false
 
-# Allow all build scripts (esbuild, @swc/core, msw, unrs-resolver). The
-# onlyBuiltDependencies list below also scopes which packages may run scripts;
-# this flag prevents pnpm from hard-erroring on pending build approvals.
+# Allow dependency build scripts required by the workspace (esbuild, @swc/core,
+# msw, and unrs-resolver) without maintaining a second conflicting allowlist.
 dangerouslyAllowAllBuilds: true
-
-onlyBuiltDependencies:
-  - '@swc/core'
-  - esbuild
-  - msw
-  - unrs-resolver
 
 overrides:
   # replit uses linux-x64 only, we can exclude all other platforms
@@ -164,5 +157,3 @@ overrides:
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
 
-allowBuilds:
-  esbuild: set this to true or false
