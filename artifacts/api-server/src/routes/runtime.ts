@@ -21,7 +21,7 @@ import {
   queueCommand,
   takeCommands,
 } from "../lib/runtime-store";
-import { canEnter } from "../lib/occupancy";
+import { canEnter, claimSeat, getClientId, getOccupancy } from "../lib/occupancy";
 import { routeChat } from "../lib/ai-router";
 import { config } from "../lib/config";
 import { detectKey, vaultStatus } from "../lib/key-vault";
@@ -46,9 +46,11 @@ router.get("/runtime/status", (_req, res): void => {
   res.json(getRuntimeStatus());
 });
 
-router.get("/occupancy", (_req, res): void => {
-  const occ = canEnter() ? { busy: false, ownerId: null } : { busy: true, ownerId: getRuntimeStatus().sessionId };
-  res.json(occ);
+router.get("/occupancy", (req, res): void => {
+  const clientId = getClientId(req, res);
+  claimSeat(clientId);
+  res.set("Cache-Control", "no-store");
+  res.json(getOccupancy(clientId));
 });
 
 router.post("/runtime/bootstrap", (req, res): void => {
