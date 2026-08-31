@@ -206,12 +206,12 @@ export const GetColabCommandsResponse = zod.object({
  */
 export const sendAssistantMessageBodyMessageMax = 12000;
 
-
+export const sendAssistantMessageBodyPreferenceDefault = `ensemble`;
 
 export const SendAssistantMessageBody = zod.object({
   "sessionId": zod.string().nullish(),
   "message": zod.string().min(1).max(sendAssistantMessageBodyMessageMax),
-  "preference": zod.enum(['primary', 'fast']).optional(),
+  "preference": zod.enum(['ensemble', 'primary', 'fast']).default(sendAssistantMessageBodyPreferenceDefault),
   "execute": zod.boolean()
 })
 
