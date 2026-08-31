@@ -639,7 +639,9 @@ components:
           type: boolean
         ownerId:
           type: ["string", "null"]
-      required: [busy, ownerId]
+        allowed:
+          type: boolean
+      required: [busy, ownerId, allowed]
     ProjectSaveInput:
       type: object
       properties:
