@@ -10,4 +10,5 @@ export interface OccupancyState {
   busy: boolean;
   /** @nullable */
   ownerId: string | null;
+  allowed: boolean;
 }
