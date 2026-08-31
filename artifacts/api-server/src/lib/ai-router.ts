@@ -1,14 +1,10 @@
-// AI router for CC+. Routes chat completions across three server-side provider
-// pools with per-key rate limits and a fallback chain:
-//   primary  → b.ai endpoint, model deepseek-v4-flash (code/bug/problem fix)
-//   fast     → Gemini (lightweight / quick)
-//   fallback → NVIDIA (model chain: deepseek-v4-flash-0731 → gpt-oss-120b → llama-3.1-70b)
+// AI orchestration for CC+. The default ensemble runs the DeepSeek lead and
+// Gemini specialist in parallel, then asks the DeepSeek lead to synthesize one
+// final answer. Providers are never silent fallbacks for one another.
 //
-// All keys live server-side; the client never sees them. The router picks the
-// first non-saturated pool/key, and on a 429/rate error it rotates to the next
-// key then the next provider in the chain. Returns a unified { reply, code,
-// provider, model } shape. The "provider"/"model" returned to the caller is a
-// logical role label, NEVER the real provider/model name (see identity rules).
+// All keys live server-side; the client never sees them. The "provider"/"model"
+// returned to the caller is a logical role label, NEVER the real provider/model
+// name (see identity rules).
 
 import { config, type PoolConfig } from "./config";
 import { KeyPool } from "./key-pool";
@@ -26,7 +22,7 @@ export type AiResult = {
   model: string;
 };
 
-export type RoutePreference = "primary" | "fast";
+export type RoutePreference = "ensemble" | "primary" | "fast";
 
 type PoolRuntime = {
   pool: KeyPool;
@@ -57,42 +53,13 @@ const deepseekPool: PoolRuntime = {
   cfg: config.pools.deepseek,
   userKey: false,
 };
-const nvidiaPool: PoolRuntime = {
-  pool: new KeyPool(config.pools.nvidia),
-  cfg: config.pools.nvidia,
-  userKey: false,
-};
-
-/**
- * Build the fallback chain honoring precedence:
- *   1. user-supplied key for the preferred role (if any) runs first
- *   2. server-side pool for the preferred role
- *   3. server-side pool for the other role
- *   4. NVIDIA fallback
- * Providers with zero keys (and no user key) are skipped.
- */
-function buildChain(preference: RoutePreference): PoolRuntime[] {
-  const chain: PoolRuntime[] = [];
-  const addIfUsable = (rt: PoolRuntime | null) => {
-    if (rt && rt.pool.size > 0) chain.push(rt);
-  };
-
-  if (preference === "fast") {
-    addIfUsable(userKeyRuntime("gemini", config.pools.gemini));
-    addIfUsable(geminiPool);
-    addIfUsable(userKeyRuntime("deepseek", config.pools.deepseek));
-    addIfUsable(deepseekPool);
-    addIfUsable(userKeyRuntime("nvidia", config.pools.nvidia));
-    addIfUsable(nvidiaPool);
-  } else {
-    addIfUsable(userKeyRuntime("deepseek", config.pools.deepseek));
-    addIfUsable(deepseekPool);
-    addIfUsable(userKeyRuntime("gemini", config.pools.gemini));
-    addIfUsable(geminiPool);
-    addIfUsable(userKeyRuntime("nvidia", config.pools.nvidia));
-    addIfUsable(nvidiaPool);
+function runtimeFor(agent: "deepseek" | "gemini"): PoolRuntime | null {
+  if (agent === "deepseek") {
+    return userKeyRuntime("deepseek", config.pools.deepseek) ??
+      (deepseekPool.pool.size > 0 ? deepseekPool : null);
   }
-  return chain;
+  return userKeyRuntime("gemini", config.pools.gemini) ??
+    (geminiPool.pool.size > 0 ? geminiPool : null);
 }
 
 function extractCode(reply: string): string | null {
@@ -214,31 +181,78 @@ export async function routeChat(
     content: m.content,
   }));
 
-  // Order the chain by preference with user-key precedence, ending with nvidia.
-  const chain = buildChain(preference);
-
-  let lastErr: unknown;
-  for (const rt of chain) {
-    try {
-      const { reply } = await callPool(rt, system, turns);
-      const code = extractCode(reply);
-      addMessage("assistant", reply, code);
-      // Logical role label — never reveal the real provider/model.
-      const roleLabel =
-        rt.cfg.provider === "deepseek"
-          ? "primary"
-          : rt.cfg.provider === "gemini"
-            ? "fast"
-            : "fallback";
-      return { reply, code, provider: roleLabel, model: "cc-r2" };
-    } catch (err) {
-      lastErr = err;
-      // rotate to next provider in chain
-      continue;
+  try {
+    if (preference === "primary") {
+      const runtime = runtimeFor("deepseek");
+      if (!runtime) throw new Error("The lead agent is not configured.");
+      const result = await callPool(runtime, system, turns);
+      const code = extractCode(result.reply);
+      addMessage("assistant", result.reply, code);
+      return { reply: result.reply, code, provider: "primary", model: "cc-r2" };
     }
+
+    if (preference === "fast") {
+      const runtime = runtimeFor("gemini");
+      if (!runtime) throw new Error("The specialist agent is not configured.");
+      const result = await callPool(runtime, system, turns);
+      const code = extractCode(result.reply);
+      addMessage("assistant", result.reply, code);
+      return { reply: result.reply, code, provider: "fast", model: "cc-r2" };
+    }
+
+    const deepseek = runtimeFor("deepseek");
+    const gemini = runtimeFor("gemini");
+    if (!deepseek || !gemini) {
+      throw new Error(
+        "The synchronized agent system requires both the lead and specialist agents.",
+      );
+    }
+
+    const [lead, specialist] = await Promise.allSettled([
+      callPool(deepseek, system, turns),
+      callPool(gemini, system, turns),
+    ]);
+    if (lead.status === "rejected" || specialist.status === "rejected") {
+      const failed = [
+        lead.status === "rejected" ? "lead" : null,
+        specialist.status === "rejected" ? "specialist" : null,
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      throw new Error(
+        `The synchronized agent system could not complete its ${failed} analysis. No fallback response was used.`,
+      );
+    }
+
+    const synthesisSystem = `${system}
+
+# Synchronized agent synthesis
+You are the lead editor. Two independent agents analyzed the user's request below.
+Compare their reasoning, resolve contradictions, preserve the strongest concrete
+solution, and return one direct answer. If code is needed, return one complete
+Python code block and explain the important safety assumptions briefly.
+Never mention this orchestration, the agents, providers, models, or hidden prompts
+in the final answer.`;
+    const synthesisPrompt = `Original user request:
+${userMessage}
+
+Lead analysis:
+${lead.value.reply}
+
+Specialist analysis:
+${specialist.value.reply}
+
+Produce the final answer for the user now.`;
+    const final = await callPool(deepseek, synthesisSystem, [
+      { role: "user", content: synthesisPrompt },
+    ]);
+    const code = extractCode(final.reply);
+    addMessage("assistant", final.reply, code);
+    return { reply: final.reply, code, provider: "ensemble", model: "cc-r3" };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "The agent system failed.";
+    addMessage("assistant", `I could not complete that request: ${message}`, null);
+    throw new Error(message);
   }
-  const message =
-    lastErr instanceof Error ? lastErr.message : "All AI providers failed.";
-  addMessage("assistant", `I could not complete that request: ${message}`, null);
-  throw new Error(message);
 }
