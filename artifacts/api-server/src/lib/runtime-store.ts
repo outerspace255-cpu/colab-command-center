@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { bindMemory, clearMemory } from "./memory-store";
+import { clearVault } from "./key-vault";
 
 export type RuntimeStateName =
   | "offline"
@@ -201,6 +202,8 @@ export function disconnectSession(sessionId: string) {
   runtime.lastSeenAt = now();
   // Clear the ephemeral memory layer on disconnect (by design).
   clearMemory();
+  // Also clear the session key vault so user-supplied keys never persist.
+  clearVault();
   addEvent("system", `${runtime.target === "kaggle" ? "Kaggle" : "Colab"} runtime disconnected`, null);
   return true;
 }

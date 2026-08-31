@@ -24,6 +24,7 @@ import {
 import { canEnter } from "../lib/occupancy";
 import { routeChat } from "../lib/ai-router";
 import { config } from "../lib/config";
+import { detectKey, vaultStatus } from "../lib/key-vault";
 
 const router: IRouter = Router();
 
@@ -168,7 +169,9 @@ router.get("/colab/commands", (req, res): void => {
   res.json({ commands: takeCommands() });
 });
 
-// CC R2 assistant chat — keys are server-side; the client never sends an API key.
+// CC R2 assistant chat — keys are server-side; the client never sends an API
+// key on purpose. If a user pastes one into chat, we detect it, store it in
+// the masked session vault, and never echo the full key back in the thread.
 router.post("/assistant/chat", async (req, res): Promise<void> => {
   if (!requireSeat(req, res)) return;
   const parsed = SendAssistantMessageBody.safeParse(req.body);
@@ -177,14 +180,27 @@ router.post("/assistant/chat", async (req, res): Promise<void> => {
     return;
   }
   const { message, execute, sessionId, preference } = parsed.data;
+
+  // Scan for API keys before anything else. If found, save masked and strip the
+  // raw key from the message we forward to the AI / store in chat memory.
+  const detected = detectKey(message);
+  const safeMessage = detected
+    ? message.replace(/(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|AIza[A-Za-z0-9_\-]{20,}|nvapi-[A-Za-z0-9_\-]{16,}|[A-Za-z0-9]{32,})/g, "[key saved]")
+    : message;
+
   let result;
   try {
-    result = await routeChat(message, preference ?? "primary");
+    result = await routeChat(safeMessage, preference ?? "primary");
   } catch (error) {
     req.log.warn({ err: error }, "CC R2 chat failed");
     res
       .status(502)
-      .json({ error: error instanceof Error ? error.message : "CC R2 could not complete that request." });
+      .json({
+        error: error instanceof Error ? error.message : "CC R2 could not complete that request.",
+        // Still tell the client a key was saved even though the AI call failed.
+        keyDetected: detected ? { kind: detected.kind, masked: detected.masked } : null,
+        vault: vaultStatus(),
+      });
     return;
   }
   // Optionally auto-queue the generated code to the runtime (when not in safe mode).
@@ -201,6 +217,8 @@ router.post("/assistant/chat", async (req, res): Promise<void> => {
     commandId,
     provider: result.provider,
     model: result.model,
+    keyDetected: detected ? { kind: detected.kind, masked: detected.masked } : null,
+    vault: vaultStatus(),
   });
 });
 

@@ -85,7 +85,7 @@ export function loadConfig(): AppConfig {
           process.env["DEEPSEEK_API_KEY_2"],
         ),
         perKeyLimitPerMinute: int(process.env["DEEPSEEK_RPM"], 10),
-        model: (process.env["DEEPSEEK_MODEL"] ?? "deepseek-v4-flash").trim(),
+        model: (process.env["DEEPSEEK_MODEL"] ?? "glm-5.2").trim(),
         baseUrl: (
           process.env["DEEPSEEK_BASE_URL"] ??
           "https://api.b.ai/v1/chat/completions"

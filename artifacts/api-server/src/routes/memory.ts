@@ -18,8 +18,12 @@ import {
 } from "../lib/memory-store";
 import { saveProjectToGithub } from "../lib/github-store";
 import { config } from "../lib/config";
+import { getKey, setKey, vaultStatus, clearVault, type VaultKeyKind } from "../lib/key-vault";
 
 const router: IRouter = Router();
+
+// Optional manual key set from a settings field (masked). Body: { kind, value }
+const KINDS: VaultKeyKind[] = ["deepseek", "nvidia", "gemini", "github", "kaggle"];
 
 function memorySummary() {
   const m = getMemory();
@@ -94,8 +98,11 @@ router.post("/memory/decisions", (req, res) => {
 });
 
 router.post("/projects/save", async (req: Request, res: Response): Promise<void> => {
-  if (!config.github.token) {
-    res.status(503).json({ error: "GitHub save is not configured on the server." });
+  // Allow save when EITHER an app GitHub token is configured OR the user has
+  // supplied their own GitHub token in the session vault.
+  const userGithubToken = getKey("github");
+  if (!config.github.token && !userGithubToken) {
+    res.status(503).json({ error: "GitHub save is not configured (no app token and no user token). Add a GitHub key in chat or settings." });
     return;
   }
   const parsed = SaveProjectBody.safeParse(req.body);
@@ -124,19 +131,49 @@ router.post("/projects/save", async (req: Request, res: Response): Promise<void>
 
   const task = addTask(name);
   try {
-    const { repo, commitSha } = await saveProjectToGithub(
+    const { repo, commitSha, account } = await saveProjectToGithub(
       name,
       description || `Project saved by CC+`,
       files,
+      userGithubToken,
     );
     updateTaskGithub(task.id, repo);
-    res.status(201).json({ repo, commitSha, taskId: task.id });
+    res.status(201).json({ repo, commitSha, taskId: task.id, account });
   } catch (error) {
     req.log.warn({ err: error }, "GitHub save failed");
     res.status(502).json({
       error: error instanceof Error ? error.message : "GitHub save failed.",
     });
   }
+});
+
+// --- session key vault (masked) ---
+// GET  /vault  → list stored keys (masked only)
+// POST /vault  → store a key from a settings field { kind, value } (returns masked)
+// DELETE /vault → clear the vault (also cleared on runtime disconnect)
+router.get("/vault", (_req, res) => {
+  res.json({ keys: vaultStatus() });
+});
+
+router.post("/vault", (req, res) => {
+  const body = (req.body ?? {}) as { kind?: string; value?: string };
+  const kind = body.kind as VaultKeyKind | undefined;
+  if (!kind || !KINDS.includes(kind)) {
+    res.status(400).json({ error: `kind must be one of: ${KINDS.join(", ")}` });
+    return;
+  }
+  const value = (body.value ?? "").trim();
+  if (!value) {
+    res.status(400).json({ error: "value is required" });
+    return;
+  }
+  const masked = setKey(kind, value);
+  res.status(201).json({ kind, masked });
+});
+
+router.delete("/vault", (_req, res) => {
+  clearVault();
+  res.json({ keys: [] });
 });
 
 export default router;

@@ -1,6 +1,6 @@
 // AI router for CC+. Routes chat completions across three server-side provider
 // pools with per-key rate limits and a fallback chain:
-//   primary  → DeepSeek (code/bug/problem fix)
+//   primary  → b.ai endpoint, model glm-5.2 (code/bug/problem fix)
 //   fast     → Gemini (lightweight / quick)
 //   fallback → NVIDIA (model chain: deepseek-v4-flash-0731 → gpt-oss-120b → llama-3.1-70b)
 //
@@ -14,6 +14,7 @@ import { config, type PoolConfig } from "./config";
 import { KeyPool } from "./key-pool";
 import { buildSystemPrompt } from "./prompt";
 import { memoryContextBlock, recentChat, addMessage } from "./memory-store";
+import { getKey, type VaultKeyKind } from "./key-vault";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -30,20 +31,69 @@ export type RoutePreference = "primary" | "fast";
 type PoolRuntime = {
   pool: KeyPool;
   cfg: PoolConfig;
+  /** True when this runtime was built from a user-supplied key. */
+  userKey: boolean;
 };
+
+/**
+ * Build a PoolRuntime from a single user-supplied key. We clone the provider's
+ * static config (model / baseUrl / limits) but swap the pool for one that holds
+ * just the user's key. The user key always runs first in the chain.
+ */
+function userKeyRuntime(kind: VaultKeyKind, base: PoolConfig): PoolRuntime | null {
+  const key = getKey(kind);
+  if (!key) return null;
+  const cfg: PoolConfig = { ...base, keys: [key] };
+  return { pool: new KeyPool(cfg), cfg, userKey: true };
+}
 
 const geminiPool: PoolRuntime = {
   pool: new KeyPool(config.pools.gemini),
   cfg: config.pools.gemini,
+  userKey: false,
 };
 const deepseekPool: PoolRuntime = {
   pool: new KeyPool(config.pools.deepseek),
   cfg: config.pools.deepseek,
+  userKey: false,
 };
 const nvidiaPool: PoolRuntime = {
   pool: new KeyPool(config.pools.nvidia),
   cfg: config.pools.nvidia,
+  userKey: false,
 };
+
+/**
+ * Build the fallback chain honoring precedence:
+ *   1. user-supplied key for the preferred role (if any) runs first
+ *   2. server-side pool for the preferred role
+ *   3. server-side pool for the other role
+ *   4. NVIDIA fallback
+ * Providers with zero keys (and no user key) are skipped.
+ */
+function buildChain(preference: RoutePreference): PoolRuntime[] {
+  const chain: PoolRuntime[] = [];
+  const addIfUsable = (rt: PoolRuntime | null) => {
+    if (rt && rt.pool.size > 0) chain.push(rt);
+  };
+
+  if (preference === "fast") {
+    addIfUsable(userKeyRuntime("gemini", config.pools.gemini));
+    addIfUsable(geminiPool);
+    addIfUsable(userKeyRuntime("deepseek", config.pools.deepseek));
+    addIfUsable(deepseekPool);
+    addIfUsable(userKeyRuntime("nvidia", config.pools.nvidia));
+    addIfUsable(nvidiaPool);
+  } else {
+    addIfUsable(userKeyRuntime("deepseek", config.pools.deepseek));
+    addIfUsable(deepseekPool);
+    addIfUsable(userKeyRuntime("gemini", config.pools.gemini));
+    addIfUsable(geminiPool);
+    addIfUsable(userKeyRuntime("nvidia", config.pools.nvidia));
+    addIfUsable(nvidiaPool);
+  }
+  return chain;
+}
 
 function extractCode(reply: string): string | null {
   const m = reply.match(/```(?:python|py)?\s*([\s\S]*?)```/i);
@@ -164,24 +214,20 @@ export async function routeChat(
     content: m.content,
   }));
 
-  // Order the chain by preference, ending with nvidia fallback.
-  const chain: PoolRuntime[] =
-    preference === "fast"
-      ? [geminiPool, deepseekPool, nvidiaPool]
-      : [deepseekPool, geminiPool, nvidiaPool];
+  // Order the chain by preference with user-key precedence, ending with nvidia.
+  const chain = buildChain(preference);
 
   let lastErr: unknown;
   for (const rt of chain) {
-    if (rt.pool.size === 0) continue;
     try {
-      const { reply, model } = await callPool(rt, system, turns);
+      const { reply } = await callPool(rt, system, turns);
       const code = extractCode(reply);
       addMessage("assistant", reply, code);
       // Logical role label — never reveal the real provider/model.
       const roleLabel =
-        rt === deepseekPool
+        rt.cfg.provider === "deepseek"
           ? "primary"
-          : rt === geminiPool
+          : rt.cfg.provider === "gemini"
             ? "fast"
             : "fallback";
       return { reply, code, provider: roleLabel, model: "cc-r2" };
