@@ -1,6 +1,6 @@
 // AI router for CC+. Routes chat completions across three server-side provider
 // pools with per-key rate limits and a fallback chain:
-//   primary  → b.ai endpoint, model glm-5.2 (code/bug/problem fix)
+//   primary  → b.ai endpoint, model deepseek-v4-flash (code/bug/problem fix)
 //   fast     → Gemini (lightweight / quick)
 //   fallback → NVIDIA (model chain: deepseek-v4-flash-0731 → gpt-oss-120b → llama-3.1-70b)
 //
