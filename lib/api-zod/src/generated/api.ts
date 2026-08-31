@@ -243,7 +243,8 @@ export const GetChatThreadResponse = zod.object({
  */
 export const GetOccupancyResponse = zod.object({
   "busy": zod.boolean(),
-  "ownerId": zod.string().nullable()
+  "ownerId": zod.string().nullable(),
+  "allowed": zod.boolean()
 })
 
 
