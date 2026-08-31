@@ -530,7 +530,8 @@ components:
           maxLength: 12000
         preference:
           type: string
-          enum: [primary, fast]
+          enum: [ensemble, primary, fast]
+          default: ensemble
         execute:
           type: boolean
       required: [message, execute]
