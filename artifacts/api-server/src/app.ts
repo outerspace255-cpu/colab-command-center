@@ -4,6 +4,11 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import {
+  BUSY_MESSAGE,
+  claimSeat,
+  getClientId,
+} from "./lib/occupancy";
 
 const app: Express = express();
 
@@ -29,6 +34,20 @@ app.use(
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use("/api", (req, res, next): void => {
+  // Health checks must remain public so platform monitors never claim the seat.
+  if (req.path === "/healthz" || req.path === "/occupancy") {
+    next();
+    return;
+  }
+  const clientId = getClientId(req, res);
+  if (!claimSeat(clientId)) {
+    res.status(503).json({ error: BUSY_MESSAGE });
+    return;
+  }
+  next();
+});
 
 app.use("/api", router);
 
