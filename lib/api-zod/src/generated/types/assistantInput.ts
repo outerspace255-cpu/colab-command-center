@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { AssistantInputProvider } from './assistantInputProvider';
+import type { AssistantInputPreference } from './assistantInputPreference';
 
 export interface AssistantInput {
   /** @nullable */
@@ -15,16 +15,6 @@ export interface AssistantInput {
      * @maxLength 12000
      */
   message: string;
-  provider: AssistantInputProvider;
-  /**
-     * @minLength 1
-     * @maxLength 500
-     */
-  apiKey: string;
-  /**
-     * @minLength 1
-     * @maxLength 120
-     */
-  model: string;
+  preference?: AssistantInputPreference;
   execute: boolean;
 }

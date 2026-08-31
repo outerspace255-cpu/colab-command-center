@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, createContext, useContext, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, createContext, useContext, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -7,9 +7,15 @@ import {
   healthCheck,
   getGetRuntimeStatusQueryKey,
   getGetRuntimeEventsQueryKey,
+  getGetChatThreadQueryKey,
+  getGetOccupancyQueryKey,
+  getGetMemoryQueryKey,
   useHealthCheck,
   useGetRuntimeStatus,
   useGetRuntimeEvents,
+  useGetChatThread,
+  useGetOccupancy,
+  useGetMemory,
   useCreateRuntimeBootstrap,
   useDisconnectRuntime,
   useExecuteRuntimeCode,
@@ -17,13 +23,16 @@ import {
   useConnectColabRuntime,
   usePostColabEvent,
   useSendAssistantMessage,
+  useTogglePlanItem,
+  useSaveProject,
   type RuntimeStatus,
   type RuntimeEvent,
+  type ChatMessage,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import {
-  Activity, ArrowUpRight, Check, CircleHelp, Cloud, Code2,
-  Copy, Cpu, FileCode2, Gauge, KeyRound, Laptop, Loader2, Menu,
+  Activity, ArrowUpRight, BrainCircuit, Check, CircleHelp, Cloud, Code2,
+  Copy, Cpu, FileCode2, Gauge, GitBranch, KeyRound, Laptop, Loader2, Menu,
   Play, PlugZap, RefreshCw, RotateCcw, Send, Settings2, ShieldCheck, Square, Terminal,
   Unplug, X, Zap,
 } from 'lucide-react';
@@ -31,17 +40,14 @@ import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
 
+type Preference = 'primary' | 'fast';
 type Prefs = {
-  provider: 'gemini' | 'openai' | 'anthropic' | 'openrouter' | 'custom';
-  model: string;
+  preference: Preference;
   safeMode: boolean;
   confirmExecution: boolean;
-  apiKey: string;
-  setProvider: (value: Prefs['provider']) => void;
-  setModel: (value: string) => void;
+  setPreference: (value: Preference) => void;
   setSafeMode: (value: boolean) => void;
   setConfirmExecution: (value: boolean) => void;
-  setApiKey: (value: string) => void;
 };
 const PrefsContext = createContext<Prefs | null>(null);
 const usePrefs = () => useContext(PrefsContext)!;
@@ -49,20 +55,18 @@ const usePrefs = () => useContext(PrefsContext)!;
 const formatTime = (date?: string | null) => date ? new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(new Date(date)) : '—';
 const formatDateTime = (date?: string | null) => date ? new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(date)) : '—';
 const stateLabel = (state?: RuntimeStatus['state']) => state === 'connected' ? 'Connected' : state === 'busy' ? 'Executing' : state === 'waiting' ? 'Waiting for connector' : state === 'error' ? 'Attention needed' : 'Offline';
+const targetLabel = (target?: string | null) => target === 'kaggle' ? 'Kaggle' : 'Colab';
 
 function App() {
-  const [provider, setProviderState] = useState<Prefs['provider']>(() => (localStorage.getItem('ccc-provider') as Prefs['provider']) || 'gemini');
-  const [model, setModelState] = useState(() => localStorage.getItem('ccc-model') || 'gemini-2.0-flash');
+  const [preference, setPreferenceState] = useState<Preference>(() => (localStorage.getItem('ccc-preference') as Preference) || 'primary');
   const [safeMode, setSafeModeState] = useState(() => localStorage.getItem('ccc-safe-mode') !== 'false');
   const [confirmExecution, setConfirmState] = useState(() => localStorage.getItem('ccc-confirm') !== 'false');
-  const [apiKey, setApiKey] = useState('');
-  const setProvider = (value: Prefs['provider']) => { setProviderState(value); localStorage.setItem('ccc-provider', value); };
-  const setModel = (value: string) => { setModelState(value); localStorage.setItem('ccc-model', value); };
+  const setPreference = (value: Preference) => { setPreferenceState(value); localStorage.setItem('ccc-preference', value); };
   const setSafeMode = (value: boolean) => { setSafeModeState(value); localStorage.setItem('ccc-safe-mode', String(value)); };
   const setConfirmExecution = (value: boolean) => { setConfirmState(value); localStorage.setItem('ccc-confirm', String(value)); };
   return (
     <QueryClientProvider client={queryClient}>
-      <PrefsContext.Provider value={{ provider, model, safeMode, confirmExecution, apiKey, setProvider, setModel, setSafeMode, setConfirmExecution, setApiKey }}>
+      <PrefsContext.Provider value={{ preference, safeMode, confirmExecution, setPreference, setSafeMode, setConfirmExecution }}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
             <RoutedErrorBoundary><Shell /></RoutedErrorBoundary>
@@ -87,12 +91,12 @@ function Shell() {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <aside className={`fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-300 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center gap-3 px-6 pb-7 pt-7">
-          <div className="relative grid size-9 place-items-center rounded-xl bg-accent text-sidebar-primary-foreground shadow-[0_0_0_5px_hsl(var(--accent)/.12)]"><Terminal size={18} strokeWidth={2.5}/></div>
-          <div><div className="font-display text-[17px] font-bold tracking-tight text-sidebar-accent-foreground">colab<span className="text-accent">.</span>cc</div><div className="mono mt-0.5 text-[9px] uppercase tracking-[.2em] text-sidebar-foreground/55">command center</div></div>
+          <div className="relative grid size-9 place-items-center rounded-xl bg-accent text-sidebar-primary-foreground shadow-[0_0_0_5px_hsl(var(--accent)/.12)]"><BrainCircuit size={18} strokeWidth={2.5}/></div>
+          <div><div className="font-display text-[17px] font-bold tracking-tight text-sidebar-accent-foreground">CC<span className="text-accent">+</span></div><div className="mono mt-0.5 text-[9px] uppercase tracking-[.2em] text-sidebar-foreground/55">Colab-Command-Center</div></div>
         </div>
         <div className="mx-4 mb-6 rounded-xl border border-sidebar-border bg-sidebar-accent/60 p-3">
           <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/55"><span className={`size-1.5 rounded-full ${health?.status === 'ok' ? 'bg-emerald-400' : 'bg-accent'}`}/> control plane</div>
-          <div className="mt-2 flex items-center justify-between text-xs"><span className="text-sidebar-foreground/75">{health?.status === 'ok' ? 'API operational' : 'Checking service'}</span><span className="mono text-sidebar-foreground/45">v0.8.4</span></div>
+          <div className="mt-2 flex items-center justify-between text-xs"><span className="text-sidebar-foreground/75">{health?.status === 'ok' ? 'API operational' : 'Checking service'}</span><span className="mono text-sidebar-foreground/45">v1.0.0</span></div>
         </div>
         <nav className="space-y-1 px-3">
           <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.18em] text-sidebar-foreground/35">Workspace</div>
@@ -103,9 +107,9 @@ function Shell() {
         <div className="mt-auto p-4">
           <div className="rounded-xl border border-sidebar-border p-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-sidebar-accent-foreground"><ShieldCheck size={15} className="text-accent"/> Safety defaults on</div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-sidebar-foreground/55">Commands stay queued until your runtime is ready.</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-sidebar-foreground/55">Single-user · session memory · keys server-side.</p>
           </div>
-          <div className="mt-5 flex items-center justify-between px-2 text-[10px] text-sidebar-foreground/35"><span>PRIVATE SESSION</span><CircleHelp size={13}/></div>
+          <div className="mt-5 flex items-center justify-between px-2 text-[10px] text-sidebar-foreground/35"><span>POWERED BY CC R2</span><CircleHelp size={13}/></div>
         </div>
       </aside>
       {mobileOpen && <button aria-label="Close menu" data-testid="button-close-menu" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-sidebar/30 md:hidden"/>}
@@ -132,16 +136,19 @@ function SideLink({ href, active, icon, label, testId }: { href: string; active:
 function CommandCenter() {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
-  const { provider, model, apiKey, safeMode, confirmExecution } = usePrefs();
+  const { safeMode, confirmExecution, preference } = usePrefs();
   const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useGetRuntimeStatus({ query: { queryKey: getGetRuntimeStatusQueryKey(), refetchInterval: 5000 } });
   const sessionId = status?.sessionId ?? '';
   const eventParams = useMemo(() => ({ sessionId }), [sessionId]);
   const { data: eventResponse, isLoading: eventsLoading } = useGetRuntimeEvents(eventParams, { query: { queryKey: getGetRuntimeEventsQueryKey(eventParams), enabled: Boolean(sessionId), refetchInterval: 3500 } });
   const events = eventResponse?.events ?? [];
+  const { data: threadResponse } = useGetChatThread({ query: { queryKey: getGetChatThreadQueryKey(), refetchInterval: 4000 } });
+  const messages = threadResponse?.messages ?? [];
+  const { data: memory } = useGetMemory({ query: { queryKey: getGetMemoryQueryKey(), refetchInterval: 4000 } });
+  const { data: occupancy } = useGetOccupancy({ query: { queryKey: getGetOccupancyQueryKey(), refetchInterval: 5000 } });
   const [message, setMessage] = useState('');
   const [code, setCode] = useState('import os\\n\\nprint(os.getcwd())');
   const [activeTab, setActiveTab] = useState<'chat' | 'code'>('chat');
-  const [chatReply, setChatReply] = useState<{ reply: string; code: string | null; commandId: string | null; provider: string; model: string } | null>(null);
   const [toast, setToast] = useState('');
   const [showDisconnect, setShowDisconnect] = useState(false);
   const [showCodeConfirm, setShowCodeConfirm] = useState(false);
@@ -149,10 +156,36 @@ function CommandCenter() {
   const execute = useExecuteRuntimeCode();
   const interrupt = useInterruptRuntime();
   const disconnect = useDisconnectRuntime();
+  const saveProject = useSaveProject();
+  const togglePlan = useTogglePlanItem();
+  const threadRef = useRef<HTMLDivElement>(null);
+
+  // The single-user seat is owned by whoever holds the connected sessionId.
+  // If someone else owns the seat, we show a busy lock screen.
+  const seatOwner = occupancy?.ownerId ?? null;
+  const amOwner = !seatOwner || seatOwner === sessionId;
+  const lockedOut = Boolean(occupancy?.busy) && !amOwner;
+
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages.length, assistant.isPending]);
+
   const runAssistant = () => {
-    if (!message.trim()) return;
-    if (!apiKey) { setToast('Add an AI provider key in Settings before sending.'); return; }
-    assistant.mutate({ data: { sessionId: sessionId || null, message: message.trim(), provider, apiKey, model, execute: safeMode ? false : true } }, { onSuccess: (response) => { setChatReply(response); if (response.code) setCode(response.code); setMessage(''); qc.invalidateQueries({ queryKey: getGetRuntimeEventsQueryKey(eventParams) }); }, onError: () => setToast('The assistant could not complete that request.') });
+    if (!message.trim() || assistant.isPending) return;
+    const text = message.trim();
+    assistant.mutate({ data: { sessionId: sessionId || null, message: text, preference, execute: safeMode ? false : true } }, {
+      onSuccess: (response) => {
+        if (response.code) setCode(response.code);
+        setMessage('');
+        qc.invalidateQueries({ queryKey: getGetChatThreadQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetMemoryQueryKey() });
+        qc.invalidateQueries({ queryKey: getGetRuntimeEventsQueryKey(eventParams) });
+      },
+      onError: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : 'The assistant could not complete that request.';
+        setToast(msg);
+      },
+    });
   };
   const executeCode = () => {
     if (!sessionId || !code.trim()) return;
@@ -160,12 +193,15 @@ function CommandCenter() {
     execute.mutate({ data: { sessionId, code, description: 'Manual command from command center' } }, { onSuccess: (result) => setToast(result.message), onError: () => setToast('Command was not accepted by the runtime.') });
   };
   const runCode = () => { if (confirmExecution) setShowCodeConfirm(true); else executeCode(); };
-  const disconnectRuntime = () => { if (!sessionId) return; disconnect.mutate({ data: { sessionId } }, { onSuccess: () => { setShowDisconnect(false); refetchStatus(); setToast('Runtime disconnected safely.'); } }); };
+  const disconnectRuntime = () => { if (!sessionId) return; disconnect.mutate({ data: { sessionId } }, { onSuccess: () => { setShowDisconnect(false); refetchStatus(); setToast('Runtime disconnected. Session memory cleared.'); qc.invalidateQueries({ queryKey: getGetMemoryQueryKey() }); qc.invalidateQueries({ queryKey: getGetChatThreadQueryKey() }); qc.invalidateQueries({ queryKey: getGetOccupancyQueryKey() }); } }); };
   const interruptRuntime = () => { if (sessionId) interrupt.mutate({ data: { sessionId } }, { onSuccess: (r) => setToast(r.message) }); };
+  const doSaveProject = (name: string) => saveProject.mutate({ data: { name } }, { onSuccess: (r) => { setToast(`Saved to GitHub: ${r.repo}`); qc.invalidateQueries({ queryKey: getGetMemoryQueryKey() }); }, onError: (e: unknown) => setToast(e instanceof Error ? e.message : 'GitHub save failed.') });
+
+  if (lockedOut) return <BusyScreen />;
   return (
     <div className="animate-rise">
       <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div><div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-primary"><span className="size-1.5 rounded-full bg-primary"/>{status?.state === 'connected' ? 'Live workspace' : 'Workspace standby'}</div><h1 className="font-display text-4xl tracking-tight text-foreground md:text-[46px]">Your notebook,<br/><em className="text-primary not-italic">within reach.</em></h1><p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">Direct a connected Colab runtime with natural language, inspect every command, and stay close to what is running.</p></div>
+        <div><div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-primary"><span className="size-1.5 rounded-full bg-primary"/>{status?.state === 'connected' ? 'Live workspace' : 'Workspace standby'}</div><h1 className="font-display text-4xl tracking-tight text-foreground md:text-[46px]">Your notebook,<br/><em className="text-primary not-italic">within reach.</em></h1><p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">Direct a connected {targetLabel(status?.target)} runtime with natural language, inspect every command, and stay close to what is running.</p></div>
         <div className="flex items-center gap-2"><button onClick={() => refetchStatus()} data-testid="button-refresh-status" className="grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground"><RefreshCw size={15} className={statusLoading ? 'animate-spin' : ''}/></button>{sessionId && <button onClick={() => setShowDisconnect(true)} data-testid="button-disconnect-runtime" className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:border-destructive/40 hover:text-destructive"><Unplug size={14} className="mr-1.5 inline"/> Disconnect</button>}</div>
       </div>
       {statusError && <div className="mb-5 flex items-center justify-between rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" data-testid="status-runtime-error"><span>Runtime status is temporarily unavailable.</span><button onClick={() => refetchStatus()} data-testid="button-retry-status" className="font-bold underline">Retry</button></div>}
@@ -173,24 +209,88 @@ function CommandCenter() {
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <section className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card soft-shadow">
           <div className="flex items-center justify-between border-b border-border px-5 py-4"><div className="flex items-center gap-2.5"><div className="grid size-8 place-items-center rounded-lg bg-secondary text-primary"><Zap size={16} fill="currentColor"/></div><div><h2 className="text-sm font-bold">Command dialogue</h2><p className="text-[11px] text-muted-foreground">Ask, inspect, then execute</p></div></div><div className="flex rounded-lg bg-muted p-1"><button onClick={() => setActiveTab('chat')} data-testid="button-tab-chat" className={`rounded-md px-3 py-1.5 text-[11px] font-bold ${activeTab === 'chat' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>Chat</button><button onClick={() => setActiveTab('code')} data-testid="button-tab-code" className={`rounded-md px-3 py-1.5 text-[11px] font-bold ${activeTab === 'code' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>Code runner</button></div></div>
-          {activeTab === 'chat' ? <ChatPanel message={message} setMessage={setMessage} reply={chatReply} pending={assistant.isPending} onSend={runAssistant} provider={provider} model={model} noKey={!apiKey}/> : <CodePanel code={code} setCode={setCode} onRun={runCode} pending={execute.isPending} connected={Boolean(sessionId)} onInterrupt={interruptRuntime} interrupting={interrupt.isPending} safeMode={safeMode}/>}
+          {activeTab === 'chat' ? <ChatPanel threadRef={threadRef} messages={messages} message={message} setMessage={setMessage} pending={assistant.isPending} onSend={runAssistant} connected={Boolean(sessionId)} /> : <CodePanel code={code} setCode={setCode} onRun={runCode} pending={execute.isPending} connected={Boolean(sessionId)} onInterrupt={interruptRuntime} interrupting={interrupt.isPending} safeMode={safeMode}/>}
         </section>
-        <RuntimePanel status={status} events={events} loading={eventsLoading} onInterrupt={interruptRuntime} interrupting={interrupt.isPending} />
+        <div className="flex flex-col gap-5">
+          <MemoryPanel memory={memory} onToggle={(id) => togglePlan.mutate({ id }, { onSuccess: () => qc.invalidateQueries({ queryKey: getGetMemoryQueryKey() }) })} onSaveProject={doSaveProject} saving={saveProject.isPending} />
+          <RuntimePanel status={status} events={events} loading={eventsLoading} onInterrupt={interruptRuntime} interrupting={interrupt.isPending} />
+        </div>
       </div>
       {toast && <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-xs font-semibold soft-shadow" data-testid="status-toast"><Check size={15} className="text-emerald-600"/>{toast}<button onClick={() => setToast('')} data-testid="button-dismiss-toast"><X size={14} className="text-muted-foreground"/></button></div>}
-      {showDisconnect && <ConfirmDialog title="Disconnect this runtime?" description="Queued work will remain visible, but no new commands will be sent until you reconnect." onCancel={() => setShowDisconnect(false)} onConfirm={disconnectRuntime} pending={disconnect.isPending}/>}
-      {showCodeConfirm && <ConfirmDialog title="Queue this code on Colab?" description="This will send the current cell to your connected runtime. You can stop it from the output stream while it runs." onCancel={() => setShowCodeConfirm(false)} onConfirm={executeCode} pending={execute.isPending}/>}
+      {showDisconnect && <ConfirmDialog title="Disconnect this runtime?" description="Queued work stays visible, but session memory (chat, plan, decisions) is cleared on disconnect and no new commands run until you reconnect." onCancel={() => setShowDisconnect(false)} onConfirm={disconnectRuntime} pending={disconnect.isPending}/>}
+      {showCodeConfirm && <ConfirmDialog title="Queue this code on the runtime?" description="This will send the current cell to your connected runtime. You can stop it from the output stream while it runs." onCancel={() => setShowCodeConfirm(false)} onConfirm={executeCode} pending={execute.isPending}/>}
     </div>
   );
 }
 
-function RuntimeBanner({ status, loading, onConnect }: { status?: RuntimeStatus; loading: boolean; onConnect: () => void }) {
-  const connected = status?.state === 'connected' || status?.state === 'busy';
-  return <section className={`relative overflow-hidden rounded-2xl border ${connected ? 'border-primary/25 bg-primary/[.055]' : 'border-accent/35 bg-accent/[.08]'}`} data-testid="card-runtime-status"><div className="absolute -right-12 -top-20 size-48 rounded-full border-[22px] border-primary/5"/><div className="relative flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="flex items-center gap-4"><div className="relative grid size-11 place-items-center rounded-xl bg-card text-primary shadow-sm">{connected && <span className="animate-pulse-ring absolute inset-0 rounded-xl border-2 border-primary"/>}{loading ? <Loader2 size={19} className="animate-spin"/> : connected ? <Cloud size={20}/> : <Laptop size={20}/>}</div><div><div className="flex items-center gap-2"><span className="text-[11px] font-bold uppercase tracking-[.15em] text-muted-foreground">Colab runtime</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${connected ? 'bg-emerald-100 text-emerald-700' : 'bg-accent/25 text-foreground'}`}>{loading ? 'Checking' : stateLabel(status?.state)}</span></div><div className="mt-1 text-base font-bold">{status?.label || 'No notebook connected'}</div><div className="mt-1 text-xs text-muted-foreground">{connected ? `${status?.pythonVersion || 'Python runtime'} · Last seen ${formatTime(status?.lastSeenAt)}` : 'Connect a temporary bridge from Google Colab to begin.'}</div></div></div>{connected ? <div className="grid grid-cols-2 gap-2 text-right sm:flex sm:items-center sm:gap-6"><div><div className="mono text-lg font-medium text-primary">{status?.queuedCommands ?? 0}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">queued</div></div><div className="hidden h-8 w-px bg-border sm:block"/><div><div className="mono text-lg font-medium">{formatTime(status?.connectedAt)}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">connected</div></div></div> : <button onClick={onConnect} data-testid="button-connect-runtime" className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground hover:-translate-y-0.5 hover:shadow-lg"><PlugZap size={15}/> Connect Colab</button>}</div></section>;
+function BusyScreen() {
+  return <div className="animate-rise flex min-h-[60vh] flex-col items-center justify-center text-center"><div className="grid size-16 place-items-center rounded-2xl bg-accent/10 text-accent"><Loader2 size={30} className="animate-spin"/></div><h2 className="mt-6 font-display text-3xl tracking-tight">System is currently busy</h2><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">Another session owns the workspace right now (single-user lock). Your turn begins as soon as the active runtime disconnects. Please wait a moment and refresh.</p><Link href="/" data-testid="link-busy-retry" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground"><RefreshCw size={14}/> Retry</Link></div>;
 }
 
-function ChatPanel({ message, setMessage, reply, pending, onSend, provider, model, noKey }: { message: string; setMessage: (v: string) => void; reply: { reply: string; code: string | null; commandId: string | null; provider: string; model: string } | null; pending: boolean; onSend: () => void; provider: string; model: string; noKey: boolean }) {
-  return <div className="flex min-h-[510px] flex-col"><div className="flex-1 p-5 md:p-7">{!reply && !pending ? <div className="flex h-full min-h-[350px] flex-col justify-center"><div className="mb-5 grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground"><Terminal size={23}/></div><h3 className="font-display text-3xl tracking-tight">What are we working on?</h3><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">Describe an analysis, ask about the current state, or draft code for review. Nothing runs without your say-so.</p><div className="mt-7 grid gap-2 sm:grid-cols-2"><Prompt text="Profile the loaded dataframe" onClick={() => setMessage('Profile the loaded dataframe')} testId="button-prompt-profile"/><Prompt text="Check memory usage" onClick={() => setMessage('Check memory usage')} testId="button-prompt-memory"/><Prompt text="Find missing values" onClick={() => setMessage('Find missing values')} testId="button-prompt-missing"/><Prompt text="Explain the last output" onClick={() => setMessage('Explain the last output')} testId="button-prompt-explain"/></div></div> : <div className="space-y-5"><div className="ml-auto max-w-[86%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground">{pending ? 'Thinking through the notebook context…' : 'Request sent to the assistant.'}</div>{pending ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin text-primary"/> Reviewing your command</div> : reply && <div className="rounded-2xl rounded-tl-md border border-border bg-background p-4"><div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.13em] text-primary"><div className="grid size-5 place-items-center rounded-md bg-secondary"><Zap size={11} fill="currentColor"/></div>{reply.provider} · {reply.model}</div><p className="whitespace-pre-wrap text-sm leading-7">{reply.reply}</p>{reply.code && <div className="mt-4 overflow-hidden rounded-xl border border-sidebar-border bg-sidebar"><div className="flex items-center justify-between border-b border-sidebar-border px-3 py-2 text-[10px] text-sidebar-foreground/60"><span className="mono">suggested.py</span><CopyButton value={reply.code} testId="button-copy-assistant-code"/></div><pre className="overflow-x-auto p-4 text-xs leading-6 text-sidebar-accent-foreground"><code>{reply.code}</code></pre></div>}{reply.commandId && <div className="mt-3 flex items-center gap-2 text-[11px] text-emerald-700"><Check size={14}/> Command accepted · <span className="mono">{reply.commandId.slice(0, 12)}</span></div>}</div>}</div>}</div><div className="border-t border-border p-4 md:p-5"><div className="rounded-xl border border-border bg-background p-2 focus-within:border-primary/60 focus-within:ring-4 focus-within:ring-primary/10"><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }}} placeholder={noKey ? 'Add a provider key in Settings to start' : 'Ask your notebook anything…'} data-testid="input-chat-message" rows={2} className="w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60"/><div className="flex items-center justify-between px-1 pt-2"><div className="flex items-center gap-2 text-[10px] text-muted-foreground"><span className="mono rounded bg-muted px-1.5 py-1">{provider}</span><span>{model}</span>{noKey && <Link href="/settings" data-testid="link-chat-settings" className="font-bold text-primary hover:underline">Configure</Link>}</div><button onClick={onSend} disabled={pending || !message.trim() || noKey} data-testid="button-send-message" className="grid size-9 place-items-center rounded-lg bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"><Send size={16}/></button></div></div><p className="mt-2 px-1 text-[10px] text-muted-foreground/70">Enter to send · Shift + Enter for a new line</p></div></div>;
+function RuntimeBanner({ status, loading, onConnect }: { status?: RuntimeStatus; loading: boolean; onConnect: () => void }) {
+  const connected = status?.state === 'connected' || status?.state === 'busy';
+  return <section className={`relative overflow-hidden rounded-2xl border ${connected ? 'border-primary/25 bg-primary/[.055]' : 'border-accent/35 bg-accent/[.08]'}`} data-testid="card-runtime-status"><div className="absolute -right-12 -top-20 size-48 rounded-full border-[22px] border-primary/5"/><div className="relative flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="flex items-center gap-4"><div className="relative grid size-11 place-items-center rounded-xl bg-card text-primary shadow-sm">{connected && <span className="animate-pulse-ring absolute inset-0 rounded-xl border-2 border-primary"/>}{loading ? <Loader2 size={19} className="animate-spin"/> : connected ? <Cloud size={20}/> : <Laptop size={20}/>}</div><div><div className="flex items-center gap-2"><span className="text-[11px] font-bold uppercase tracking-[.15em] text-muted-foreground">{targetLabel(status?.target)} runtime</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${connected ? 'bg-emerald-100 text-emerald-700' : 'bg-accent/25 text-foreground'}`}>{loading ? 'Checking' : stateLabel(status?.state)}</span></div><div className="mt-1 text-base font-bold">{status?.label || 'No notebook connected'}</div><div className="mt-1 text-xs text-muted-foreground">{connected ? `${status?.pythonVersion || 'Python runtime'} · Last seen ${formatTime(status?.lastSeenAt)}` : `Connect a temporary bridge from ${targetLabel(status?.target)} to begin.`}</div></div></div>{connected ? <div className="grid grid-cols-2 gap-2 text-right sm:flex sm:items-center sm:gap-6"><div><div className="mono text-lg font-medium text-primary">{status?.queuedCommands ?? 0}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">queued</div></div><div className="hidden h-8 w-px bg-border sm:block"/><div><div className="mono text-lg font-medium">{formatTime(status?.connectedAt)}</div><div className="text-[10px] uppercase tracking-wider text-muted-foreground">connected</div></div></div> : <button onClick={onConnect} data-testid="button-connect-runtime" className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground hover:-translate-y-0.5 hover:shadow-lg"><PlugZap size={15}/> Connect {targetLabel(status?.target)}</button>}</div></section>;
+}
+
+function ChatPanel({ threadRef, messages, message, setMessage, pending, onSend, connected }: { threadRef: React.RefObject<HTMLDivElement | null>; messages: ChatMessage[]; message: string; setMessage: (v: string) => void; pending: boolean; onSend: () => void; connected: boolean }) {
+  return <div className="flex h-[560px] flex-col"><div ref={threadRef} className="flex-1 overflow-y-auto p-5 md:p-6">{messages.length === 0 && !pending ? <div className="flex h-full min-h-[350px] flex-col justify-center"><div className="mb-5 grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground"><Terminal size={23}/></div><h3 className="font-display text-3xl tracking-tight">What are we working on?</h3><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">Describe an analysis, ask about the current state, or draft code for review. Nothing runs without your say-so. CC R2 remembers the whole session.</p><div className="mt-7 grid gap-2 sm:grid-cols-2"><Prompt text="Profile the loaded dataframe" onClick={() => setMessage('Profile the loaded dataframe')} testId="button-prompt-profile"/><Prompt text="Check memory usage" onClick={() => setMessage('Check memory usage')} testId="button-prompt-memory"/><Prompt text="Find missing values" onClick={() => setMessage('Find missing values')} testId="button-prompt-missing"/><Prompt text="Explain the last output" onClick={() => setMessage('Explain the last output')} testId="button-prompt-explain"/></div></div> : <div className="space-y-5">{messages.map((m) => <MessageBubble key={m.id} message={m} />)}{pending && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin text-primary"/> CC R2 is thinking…</div>}</div>}</div><div className="border-t border-border p-4 md:p-5"><div className="rounded-xl border border-border bg-background p-2 focus-within:border-primary/60 focus-within:ring-4 focus-within:ring-primary/10"><textarea value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }}} placeholder={connected ? 'Ask your notebook anything…' : 'Connect a runtime first, then ask away…'} data-testid="input-chat-message" rows={2} className="w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60"/><div className="flex items-center justify-between px-1 pt-2"><div className="flex items-center gap-2 text-[10px] text-muted-foreground"><span className="mono rounded bg-muted px-1.5 py-1">CC R2</span>{!connected && <Link href="/setup" data-testid="link-chat-setup" className="font-bold text-primary hover:underline">Connect runtime</Link>}</div><button onClick={onSend} disabled={pending || !message.trim()} data-testid="button-send-message" className="grid size-9 place-items-center rounded-lg bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"><Send size={16}/></button></div></div><p className="mt-2 px-1 text-[10px] text-muted-foreground/70">Enter to send · Shift + Enter for a new line</p></div></div>;
+}
+
+function MessageBubble({ message }: { message: ChatMessage }) {
+  if (message.role === 'user') return <div className="ml-auto max-w-[86%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground"><p className="whitespace-pre-wrap break-words">{message.content}</p>{message.code && <pre className="mt-3 overflow-x-auto rounded-lg bg-primary-foreground/10 p-3 text-xs leading-6"><code>{message.code}</code></pre>}</div>;
+  return <div className="max-w-[86%] rounded-2xl rounded-tl-md border border-border bg-background p-4"><div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.13em] text-primary"><div className="grid size-5 place-items-center rounded-md bg-secondary"><Zap size={11} fill="currentColor"/></div>CC R2</div><p className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</p>{message.code && <div className="mt-4 overflow-hidden rounded-xl border border-sidebar-border bg-sidebar"><div className="flex items-center justify-between border-b border-sidebar-border px-3 py-2 text-[10px] text-sidebar-foreground/60"><span className="mono">suggested.py</span><CopyButton value={message.code} testId="button-copy-assistant-code"/></div><pre className="overflow-x-auto p-4 text-xs leading-6 text-sidebar-accent-foreground"><code>{message.code}</code></pre></div>}</div>;
+}
+
+function MemoryPanel({ memory, onToggle, onSaveProject, saving }: { memory?: import('@workspace/api-client-react').MemorySummary; onToggle: (id: string) => void; onSaveProject: (name: string) => void; saving: boolean }) {
+  const plan = memory?.plan ?? [];
+  const points = memory?.points ?? [];
+  const decisions = memory?.decisions ?? [];
+  const tasks = memory?.tasks ?? [];
+  const hasNotes = plan.length + points.length + decisions.length + tasks.length > 0;
+  const onSave = () => { const name = window.prompt('Project name to save on GitHub?', 'cc-plus-session'); if (name?.trim()) onSaveProject(name.trim()); };
+  return (
+    <section className="rounded-2xl border border-border bg-card soft-shadow" data-testid="card-memory">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="flex items-center gap-2"><BrainCircuit size={16} className="text-primary"/><h2 className="text-sm font-bold">Session memory</h2></div>
+        <span className="mono text-[10px] text-muted-foreground">{plan.length + points.length + decisions.length} notes</span>
+      </div>
+      <div className="max-h-[230px] space-y-4 overflow-y-auto p-4">
+        {!hasNotes ? (
+          <div className="py-6 text-center text-xs text-muted-foreground">No memory yet. CC R2 records plan, decisions and key points here as you work. Cleared on disconnect.</div>
+        ) : (
+          <>
+            <MemorySection title="Plan" items={plan.map((p) => ({ id: p.id, text: p.text, done: p.done }))} onToggle={onToggle} />
+            <MemorySection title="Important points" items={points.map((p) => ({ id: p.id, text: p.text }))} />
+            <MemorySection title="Decisions" items={decisions.map((d) => ({ id: d.id, text: d.text }))} />
+            {tasks.length > 0 && (
+              <div>
+                <div className="mb-2 text-[10px] font-bold uppercase tracking-[.13em] text-muted-foreground">Saved projects</div>
+                <div className="space-y-1.5">
+                  {tasks.map((t) => (
+                    <div key={t.id} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs">
+                      <GitBranch size={12} className="text-primary"/>
+                      <span className="font-semibold">{t.name}</span>
+                      {t.githubRepo && <a href={`https://github.com/${t.githubRepo}`} target="_blank" rel="noreferrer" className="mono ml-auto text-[10px] text-primary hover:underline">{t.githubRepo}</a>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="border-t border-border p-3">
+        <button onClick={onSave} disabled={saving} data-testid="button-save-github" className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-[11px] font-bold hover:border-primary/40 disabled:opacity-50">
+          {saving ? <Loader2 size={13} className="animate-spin"/> : <GitBranch size={13}/>} Save session to GitHub
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function MemorySection({ title, items, onToggle }: { title: string; items: { id: string; text: string; done?: boolean }[]; onToggle?: (id: string) => void }) {
+  if (items.length === 0) return null;
+  return <div><div className="mb-2 text-[10px] font-bold uppercase tracking-[.13em] text-muted-foreground">{title}</div><div className="space-y-1.5">{items.map((it) => <button key={it.id} onClick={() => onToggle?.(it.id)} className="flex w-full items-start gap-2 rounded-lg border border-border px-2.5 py-1.5 text-left text-xs hover:border-primary/40"><span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border ${it.done ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>{it.done && <Check size={10} className="size-3" />}</span><span className={it.done ? 'text-muted-foreground line-through' : ''}>{it.text}</span></button>)}</div></div>;
 }
 
 function Prompt({ text, onClick, testId }: { text: string; onClick: () => void; testId: string }) { return <button onClick={onClick} data-testid={testId} className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"><span>{text}</span><ArrowUpRight size={13}/></button>; }
@@ -212,6 +312,7 @@ function SetupPage() {
   const postEvent = usePostColabEvent();
   const qc = useQueryClient();
   const { data: status } = useGetRuntimeStatus({ query: { queryKey: getGetRuntimeStatusQueryKey(), refetchInterval: 5000 } });
+  const [target, setTarget] = useState<'colab' | 'kaggle'>('colab');
   const [label, setLabel] = useState('My Colab notebook');
   const [bootstrap, setBootstrap] = useState<{ sessionId: string; token: string; connectorCode: string; expiresAt: string } | null>(null);
   const [sessionId, setSessionId] = useState('');
@@ -219,11 +320,12 @@ function SetupPage() {
   const [runtimeName, setRuntimeName] = useState('My Colab notebook');
   const [pythonVersion, setPythonVersion] = useState('3.11');
   const [notice, setNotice] = useState('');
-  const generate = () => create.mutate({ data: { label } }, { onSuccess: (data) => { setBootstrap(data); setSessionId(data.sessionId); setToken(data.token); }, onError: () => setNotice('Could not create a bootstrap session. Try again.') });
-  const connectRuntime = () => connect.mutate({ data: { sessionId, token, runtimeName, pythonVersion } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getGetRuntimeStatusQueryKey() }); setNotice('Connector registered. Start the Colab cell to finish the handshake.'); }, onError: () => setNotice('That session could not be connected. Check the session details.') });
-  const sendHeartbeat = () => postEvent.mutate({ data: { sessionId, token, type: 'system', message: 'Manual connector check from Command Center', payload: null } }, { onSuccess: () => setNotice('Test signal accepted by the control plane.') });
-  const code = bootstrap?.connectorCode || `# Paste this cell into Google Colab\\n# A temporary connector session will be created\\n\\n${label}\\n`;
-  return <div className="animate-rise max-w-5xl"><PageIntro eyebrow="CONNECTOR SETUP" title="Bring the notebook closer." description="A short-lived bridge lets Command Center talk to your own Colab runtime. Your code stays in Colab; only commands and events cross the connection."/><div className="mt-8 grid gap-5 lg:grid-cols-[1.08fr_.92fr]"><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><Step n="01" title="Create a private session" copy="Give this bridge a name so you can recognize it in your workspace."/><label className="mt-5 block text-xs font-bold">Runtime label<input value={label} onChange={(e) => setLabel(e.target.value)} data-testid="input-bootstrap-label" maxLength={80} className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><button onClick={generate} disabled={create.isPending || !label.trim()} data-testid="button-create-bootstrap" className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50">{create.isPending ? <Loader2 size={15} className="animate-spin"/> : <KeyRound size={15}/>} {bootstrap ? 'Regenerate session' : 'Create bootstrap session'}</button>{bootstrap && <div className="mt-5 rounded-xl border border-primary/20 bg-primary/[.05] p-4"><div className="flex items-center justify-between text-xs font-bold"><span>Session created</span><span className="text-primary">Expires {formatTime(bootstrap.expiresAt)}</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><KeyValue label="SESSION_ID" value={bootstrap.sessionId}/><KeyValue label="TOKEN" value={bootstrap.token}/></div></div>}</section><section className="rounded-2xl border border-border bg-sidebar text-sidebar-foreground soft-shadow"><div className="flex items-center justify-between border-b border-sidebar-border px-5 py-4"><div className="flex items-center gap-2 text-sm font-bold text-sidebar-accent-foreground"><Code2 size={16} className="text-accent"/> Colab bootstrap cell</div><CopyButton value={code} testId="button-copy-bootstrap"/></div><pre className="min-h-[260px] overflow-auto p-5 text-xs leading-6 text-sidebar-accent-foreground/85"><code>{code}</code></pre><div className="border-t border-sidebar-border px-5 py-4 text-[11px] leading-relaxed text-sidebar-foreground/60">Paste the generated cell into a fresh Colab cell and run it. Keep this tab open while the connector registers.</div></section></div><section className="mt-5 rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><Step n="02" title="Register the connector" copy="The cell posts its credentials back here. You can also enter them manually if you already have a session."/><div className="mt-5 grid gap-4 md:grid-cols-2"><label className="text-xs font-bold">Session ID<input value={sessionId} onChange={(e) => setSessionId(e.target.value)} data-testid="input-session-id" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Session token<input value={token} onChange={(e) => setToken(e.target.value)} data-testid="input-session-token" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Runtime name<input value={runtimeName} onChange={(e) => setRuntimeName(e.target.value)} data-testid="input-runtime-name" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Python version<input value={pythonVersion} onChange={(e) => setPythonVersion(e.target.value)} data-testid="input-python-version" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label></div><div className="mt-5 flex flex-wrap gap-2"><button onClick={connectRuntime} disabled={connect.isPending || sessionId.length < 8 || token.length < 1} data-testid="button-register-connector" className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50">{connect.isPending ? <Loader2 size={15} className="animate-spin"/> : <PlugZap size={15}/>} Register connector</button>{sessionId && token && <button onClick={sendHeartbeat} disabled={postEvent.isPending} data-testid="button-test-connector" className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-bold hover:border-primary/40">{postEvent.isPending ? <Loader2 size={14} className="animate-spin"/> : <Activity size={14}/>} Send test signal</button>}{status?.sessionId && <Link href="/" data-testid="link-return-command-center" className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-bold hover:border-primary/40">Open command center <ArrowUpRight size={14}/></Link>}</div>{notice && <p className="mt-4 rounded-lg bg-secondary px-3 py-2.5 text-xs font-semibold text-primary" data-testid="status-setup-notice">{notice}</p>}</section><div className="mt-6 flex gap-3 rounded-xl border border-border bg-secondary/50 p-4 text-xs leading-relaxed text-muted-foreground"><ShieldCheck size={17} className="mt-0.5 shrink-0 text-primary"/><p><strong className="text-foreground">Designed for control.</strong> Sessions are temporary, tokens are shown only during setup, and every runtime action is visible in the output stream.</p></div></div>;
+  const isKaggle = target === 'kaggle';
+  const generate = () => { setLabel(isKaggle ? 'My Kaggle notebook' : 'My Colab notebook'); create.mutate({ data: { label: isKaggle ? 'My Kaggle notebook' : label, target } }, { onSuccess: (data) => { setBootstrap(data); setSessionId(data.sessionId); setToken(data.token); }, onError: () => setNotice('Could not create a bootstrap session. Try again.') }); };
+  const connectRuntime = () => connect.mutate({ data: { sessionId, token, runtimeName, pythonVersion } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getGetRuntimeStatusQueryKey() }); setNotice('Connector registered. Start the cell to finish the handshake.'); }, onError: () => setNotice('That session could not be connected. Check the session details.') });
+  const sendHeartbeat = () => postEvent.mutate({ data: { sessionId, token, type: 'system', message: 'Manual connector check from CC+', payload: null } }, { onSuccess: () => setNotice('Test signal accepted by the control plane.') });
+  const code = bootstrap?.connectorCode || `# Paste this cell into ${isKaggle ? 'Kaggle' : 'Google Colab'}\\n# A temporary connector session will be created\\n\\n${label}\\n`;
+  return <div className="animate-rise max-w-5xl"><PageIntro eyebrow="CONNECTOR SETUP" title="Bring the notebook closer." description={`A short-lived bridge lets CC+ talk to your own ${isKaggle ? 'Kaggle' : 'Colab'} runtime. Your code stays in the notebook; only commands and events cross the connection.`}/><div className="mt-8 grid gap-5 lg:grid-cols-[1.08fr_.92fr]"><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><Step n="01" title="Create a private session" copy="Pick a target and give this bridge a name so you can recognize it in your workspace."/><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold">Target<div className="mt-2 flex rounded-lg bg-muted p-1"><button onClick={() => setTarget('colab')} data-testid="button-target-colab" className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-bold ${target === 'colab' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}><Cloud size={13}/> Colab</button><button onClick={() => setTarget('kaggle')} data-testid="button-target-kaggle" className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-bold ${target === 'kaggle' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}><Terminal size={13}/> Kaggle</button></div></label><label className="text-xs font-bold">Runtime label<input value={label} onChange={(e) => setLabel(e.target.value)} data-testid="input-bootstrap-label" maxLength={80} className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label></div><button onClick={generate} disabled={create.isPending || !label.trim()} data-testid="button-create-bootstrap" className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50">{create.isPending ? <Loader2 size={15} className="animate-spin"/> : <KeyRound size={15}/>} {bootstrap ? 'Regenerate session' : `Create ${isKaggle ? 'Kaggle' : 'Colab'} session`}</button>{bootstrap && <div className="mt-5 rounded-xl border border-primary/20 bg-primary/[.05] p-4"><div className="flex items-center justify-between text-xs font-bold"><span>Session created</span><span className="text-primary">Expires {formatTime(bootstrap.expiresAt)}</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><KeyValue label="SESSION_ID" value={bootstrap.sessionId}/><KeyValue label="TOKEN" value={bootstrap.token}/></div></div>}</section><section className="rounded-2xl border border-border bg-sidebar text-sidebar-foreground soft-shadow"><div className="flex items-center justify-between border-b border-sidebar-border px-5 py-4"><div className="flex items-center gap-2 text-sm font-bold text-sidebar-accent-foreground"><Code2 size={16} className="text-accent"/> {isKaggle ? 'Kaggle' : 'Colab'} bootstrap cell</div><CopyButton value={code} testId="button-copy-bootstrap"/></div><pre className="min-h-[260px] overflow-auto p-5 text-xs leading-6 text-sidebar-accent-foreground/85"><code>{code}</code></pre><div className="border-t border-sidebar-border px-5 py-4 text-[11px] leading-relaxed text-sidebar-foreground/60">Paste the generated cell into a fresh {isKaggle ? 'Kaggle' : 'Colab'} cell and run it. Keep this tab open while the connector registers.</div></section></div><section className="mt-5 rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><Step n="02" title="Register the connector" copy="The cell posts its credentials back here. You can also enter them manually if you already have a session."/><div className="mt-5 grid gap-4 md:grid-cols-2"><label className="text-xs font-bold">Session ID<input value={sessionId} onChange={(e) => setSessionId(e.target.value)} data-testid="input-session-id" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Session token<input value={token} onChange={(e) => setToken(e.target.value)} data-testid="input-session-token" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Runtime name<input value={runtimeName} onChange={(e) => setRuntimeName(e.target.value)} data-testid="input-runtime-name" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold">Python version<input value={pythonVersion} onChange={(e) => setPythonVersion(e.target.value)} data-testid="input-python-version" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label></div><div className="mt-5 flex flex-wrap gap-2"><button onClick={connectRuntime} disabled={connect.isPending || sessionId.length < 8 || token.length < 1} data-testid="button-register-connector" className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50">{connect.isPending ? <Loader2 size={15} className="animate-spin"/> : <PlugZap size={15}/>} Register connector</button>{sessionId && token && <button onClick={sendHeartbeat} disabled={postEvent.isPending} data-testid="button-test-connector" className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-bold hover:border-primary/40">{postEvent.isPending ? <Loader2 size={14} className="animate-spin"/> : <Activity size={14}/>} Send test signal</button>}{status?.sessionId && <Link href="/" data-testid="link-return-command-center" className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-xs font-bold hover:border-primary/40">Open command center <ArrowUpRight size={14}/></Link>}</div>{notice && <p className="mt-4 rounded-lg bg-secondary px-3 py-2.5 text-xs font-semibold text-primary" data-testid="status-setup-notice">{notice}</p>}</section><div className="mt-6 flex gap-3 rounded-xl border border-border bg-secondary/50 p-4 text-xs leading-relaxed text-muted-foreground"><ShieldCheck size={17} className="mt-0.5 shrink-0 text-primary"/><p><strong className="text-foreground">Designed for control.</strong> Sessions are temporary, tokens are shown only during setup, and every runtime action is visible in the output stream. Memory is cleared on disconnect.</p></div></div>;
 }
 
 function Step({ n, title, copy }: { n: string; title: string; copy: string }) { return <div className="flex gap-3"><span className="mono grid size-7 shrink-0 place-items-center rounded-lg bg-secondary text-[10px] font-bold text-primary">{n}</span><div><h2 className="text-sm font-bold">{title}</h2><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{copy}</p></div></div>; }
@@ -241,7 +343,7 @@ function SettingsPage() {
     const timer = setTimeout(() => setSaved(false), 2200);
     return () => clearTimeout(timer);
   }, [saved]);
-  return <div className="animate-rise max-w-4xl"><PageIntro eyebrow="WORKSPACE SETTINGS" title="Tune the control surface." description="Choose how Command Center thinks, what it can do, and how much friction you want before code reaches your runtime."/><div className="mt-8 space-y-5"><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<Cpu size={17}/>} title="Assistant provider" copy="Your key stays in memory for this session and is never written to local storage."/><div className="mt-6 grid gap-5 md:grid-cols-2"><label className="text-xs font-bold">Provider<select value={prefs.provider} onChange={(e) => prefs.setProvider(e.target.value as Prefs['provider'])} data-testid="select-provider" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="openrouter">OpenRouter</option><option value="custom">Custom provider</option></select></label><label className="text-xs font-bold">Model<input value={prefs.model} onChange={(e) => prefs.setModel(e.target.value)} data-testid="input-model" className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></label><label className="text-xs font-bold md:col-span-2">API key <span className="font-normal text-muted-foreground">· session only</span><div className="relative mt-2"><KeyRound size={15} className="absolute left-3 top-3 text-muted-foreground"/><input type="password" value={prefs.apiKey} onChange={(e) => prefs.setApiKey(e.target.value)} data-testid="input-api-key" placeholder="Paste a provider key to enable chat" className="w-full rounded-lg border border-input bg-background py-2.5 pl-9 pr-3 font-mono text-xs outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"/></div></label></div></section><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<ShieldCheck size={17}/>} title="Execution guardrails" copy="These preferences affect what the assistant is allowed to send to Colab."/><div className="mt-5 space-y-1"><Toggle checked={prefs.safeMode} onChange={prefs.setSafeMode} title="Safe mode" description="Draft code for review instead of executing assistant-generated code automatically." testId="toggle-safe-mode"/><Toggle checked={prefs.confirmExecution} onChange={prefs.setConfirmExecution} title="Confirm runtime commands" description="Require a deliberate action before manually drafted code is queued." testId="toggle-confirm-execution"/></div></section><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<Cloud size={17}/>} title="Control plane health" copy="A quick diagnostic for the service that brokers your runtime connection."/><div className="mt-5 flex flex-wrap items-center gap-3"><div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2 text-xs font-semibold"><span className={`size-2 rounded-full ${health?.status === 'ok' || healthResult === 'ok' ? 'bg-emerald-500' : 'bg-accent'}`}/>{healthLoading ? 'Checking…' : healthResult || health?.status || 'Ready to check'}</div><button onClick={testHealth} data-testid="button-test-health" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold hover:border-primary/40"><RefreshCw size={13}/> Run diagnostic</button></div></section><div className="flex items-center justify-end gap-3"><span className={`text-xs font-semibold text-emerald-700 transition-opacity ${saved ? 'opacity-100' : 'opacity-0'}`} data-testid="status-settings-saved"><Check size={14} className="mr-1 inline"/>Preferences saved</span><button onClick={() => setSaved(true)} data-testid="button-save-settings" className="rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground hover:-translate-y-0.5">Save preferences</button></div></div></div>;
+  return <div className="animate-rise max-w-4xl"><PageIntro eyebrow="WORKSPACE SETTINGS" title="Tune the control surface." description="Choose how CC+ thinks, what it can do, and how much friction you want before code reaches your runtime. API keys are managed on the server — you never enter one here."/><div className="mt-8 space-y-5"><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<Cpu size={17}/>} title="Assistant personality" copy="CC R2 is a single bundled agent. Pick whether it should lean toward its powerful primary model or a faster lightweight one."/><div className="mt-6 flex rounded-lg bg-muted p-1"><button onClick={() => prefs.setPreference('primary')} data-testid="button-preference-primary" className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-xs font-bold ${prefs.preference === 'primary' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}><BrainCircuit size={14}/> Primary (powerful)</button><button onClick={() => prefs.setPreference('fast')} data-testid="button-preference-fast" className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2.5 text-xs font-bold ${prefs.preference === 'fast' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}><Zap size={14} fill="currentColor"/> Fast (lightweight)</button></div><p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">Keys never appear in the app. The server holds a pool of keys and rotates them automatically across providers with rate-limit awareness.</p></section><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<ShieldCheck size={17}/>} title="Execution guardrails" copy="These preferences affect what the assistant is allowed to send to your runtime."/><div className="mt-5 space-y-1"><Toggle checked={prefs.safeMode} onChange={prefs.setSafeMode} title="Safe mode" description="Draft code for review instead of executing assistant-generated code automatically." testId="toggle-safe-mode"/><Toggle checked={prefs.confirmExecution} onChange={prefs.setConfirmExecution} title="Confirm runtime commands" description="Require a deliberate action before manually drafted code is queued." testId="toggle-confirm-execution"/></div></section><section className="rounded-2xl border border-border bg-card p-5 soft-shadow md:p-7"><SectionHeading icon={<Cloud size={17}/>} title="Control plane health" copy="A quick diagnostic for the service that brokers your runtime connection."/><div className="mt-5 flex flex-wrap items-center gap-3"><div className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2 text-xs font-semibold"><span className={`size-2 rounded-full ${health?.status === 'ok' || healthResult === 'ok' ? 'bg-emerald-500' : 'bg-accent'}`}/>{healthLoading ? 'Checking…' : healthResult || health?.status || 'Ready to check'}</div><button onClick={testHealth} data-testid="button-test-health" className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold hover:border-primary/40"><RefreshCw size={13}/> Run diagnostic</button></div></section><div className="flex items-center justify-end gap-3"><span className={`text-xs font-semibold text-emerald-700 transition-opacity ${saved ? 'opacity-100' : 'opacity-0'}`} data-testid="status-settings-saved"><Check size={14} className="mr-1 inline"/>Preferences saved</span><button onClick={() => setSaved(true)} data-testid="button-save-settings" className="rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground hover:-translate-y-0.5">Save preferences</button></div></div></div>;
 }
 
 function PageIntro({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) { return <div><div className="mb-2 text-[10px] font-bold uppercase tracking-[.2em] text-primary">{eyebrow}</div><h1 className="font-display text-4xl tracking-tight md:text-[46px]">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p></div>; }

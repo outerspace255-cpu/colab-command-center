@@ -9,12 +9,21 @@ export interface HealthStatus {
   status: string;
 }
 
+export type BootstrapInputTarget = typeof BootstrapInputTarget[keyof typeof BootstrapInputTarget];
+
+
+export const BootstrapInputTarget = {
+  colab: 'colab',
+  kaggle: 'kaggle',
+} as const;
+
 export interface BootstrapInput {
   /**
      * @minLength 1
      * @maxLength 80
      */
   label: string;
+  target?: BootstrapInputTarget;
 }
 
 export interface SessionInput {
@@ -33,12 +42,25 @@ export const RuntimeStatusState = {
   error: 'error',
 } as const;
 
+/**
+ * @nullable
+ */
+export type RuntimeStatusTarget = typeof RuntimeStatusTarget[keyof typeof RuntimeStatusTarget] | null;
+
+
+export const RuntimeStatusTarget = {
+  colab: 'colab',
+  kaggle: 'kaggle',
+} as const;
+
 export interface RuntimeStatus {
   state: RuntimeStatusState;
   /** @nullable */
   sessionId: string | null;
   /** @nullable */
   label: string | null;
+  /** @nullable */
+  target: RuntimeStatusTarget;
   /** @nullable */
   connectedAt: string | null;
   /** @nullable */
@@ -149,15 +171,12 @@ export interface AcceptedResponse {
   message: string;
 }
 
-export type AssistantInputProvider = typeof AssistantInputProvider[keyof typeof AssistantInputProvider];
+export type AssistantInputPreference = typeof AssistantInputPreference[keyof typeof AssistantInputPreference];
 
 
-export const AssistantInputProvider = {
-  openai: 'openai',
-  gemini: 'gemini',
-  anthropic: 'anthropic',
-  openrouter: 'openrouter',
-  custom: 'custom',
+export const AssistantInputPreference = {
+  primary: 'primary',
+  fast: 'fast',
 } as const;
 
 export interface AssistantInput {
@@ -168,17 +187,7 @@ export interface AssistantInput {
      * @maxLength 12000
      */
   message: string;
-  provider: AssistantInputProvider;
-  /**
-     * @minLength 1
-     * @maxLength 500
-     */
-  apiKey: string;
-  /**
-     * @minLength 1
-     * @maxLength 120
-     */
-  model: string;
+  preference?: AssistantInputPreference;
   execute: boolean;
 }
 
@@ -190,6 +199,88 @@ export interface AssistantResponse {
   commandId: string | null;
   provider: string;
   model: string;
+}
+
+export type ChatMessageRole = typeof ChatMessageRole[keyof typeof ChatMessageRole];
+
+
+export const ChatMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+  system: 'system',
+} as const;
+
+export interface ChatMessage {
+  id: string;
+  role: ChatMessageRole;
+  content: string;
+  /** @nullable */
+  code: string | null;
+  createdAt: string;
+}
+
+export interface ChatThreadResponse {
+  messages: ChatMessage[];
+}
+
+export interface PlanItem {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: string;
+}
+
+export interface NamedItem {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface ProjectTask {
+  id: string;
+  name: string;
+  /** @nullable */
+  githubRepo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemorySummary {
+  messages: ChatMessage[];
+  plan: PlanItem[];
+  decisions: NamedItem[];
+  points: NamedItem[];
+  tasks: ProjectTask[];
+}
+
+export interface OccupancyState {
+  busy: boolean;
+  /** @nullable */
+  ownerId: string | null;
+}
+
+export interface ProjectSaveInput {
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  name: string;
+  /** @maxLength 500 */
+  description?: string;
+}
+
+export interface ProjectSaveResponse {
+  repo: string;
+  commitSha: string;
+  taskId: string;
+}
+
+export interface PlanItemInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  text: string;
 }
 
 export type GetRuntimeEventsParams = {

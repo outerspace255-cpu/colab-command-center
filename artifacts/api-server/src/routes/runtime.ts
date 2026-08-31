@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import {
-  BootstrapInput,
   ConnectColabRuntimeBody,
   CreateRuntimeBootstrapBody,
   DisconnectRuntimeBody,
@@ -22,6 +21,9 @@ import {
   queueCommand,
   takeCommands,
 } from "../lib/runtime-store";
+import { canEnter } from "../lib/occupancy";
+import { routeChat } from "../lib/ai-router";
+import { config } from "../lib/config";
 
 const router: IRouter = Router();
 
@@ -29,8 +31,23 @@ function invalid(res: Parameters<Parameters<IRouter["post"]>[1]>[1], message: st
   res.status(400).json({ error: message });
 }
 
+// Single-user occupancy guard: rejects callers that don't own the seat.
+function requireSeat(req: Parameters<Parameters<IRouter["post"]>[1]>[0], res: Parameters<Parameters<IRouter["post"]>[1]>[1]): boolean {
+  if (!config.occupancyLock) return true;
+  const sessionId =
+    (typeof req.body === "object" && req.body?.sessionId) || undefined;
+  if (canEnter(sessionId)) return true;
+  res.status(503).json({ error: "system is currently busy. please try again later." });
+  return false;
+}
+
 router.get("/runtime/status", (_req, res): void => {
   res.json(getRuntimeStatus());
+});
+
+router.get("/occupancy", (_req, res): void => {
+  const occ = canEnter() ? { busy: false, ownerId: null } : { busy: true, ownerId: getRuntimeStatus().sessionId };
+  res.json(occ);
 });
 
 router.post("/runtime/bootstrap", (req, res): void => {
@@ -40,7 +57,8 @@ router.post("/runtime/bootstrap", (req, res): void => {
     return;
   }
   const origin = `${req.protocol}://${req.get("host")}`;
-  res.status(201).json(createSession(parsed.data.label, origin));
+  const target = parsed.data.target ?? "colab";
+  res.status(201).json(createSession(parsed.data.label, origin, target));
 });
 
 router.post("/runtime/disconnect", (req, res): void => {
@@ -54,6 +72,7 @@ router.post("/runtime/disconnect", (req, res): void => {
 });
 
 router.post("/runtime/execute", (req, res): void => {
+  if (!requireSeat(req, res)) return;
   const parsed = ExecuteRuntimeCodeBody.safeParse(req.body);
   if (!parsed.success) {
     invalid(res, parsed.error.message);
@@ -61,14 +80,14 @@ router.post("/runtime/execute", (req, res): void => {
   }
   const status = getRuntimeStatus();
   if (status.sessionId !== parsed.data.sessionId || status.state === "offline") {
-    res.status(409).json({ error: "Connect a Colab runtime before running code." });
+    res.status(409).json({ error: "Connect a runtime before running code." });
     return;
   }
   const command = queueCommand(parsed.data.code, parsed.data.description ?? null);
   res.status(202).json({
     accepted: true,
     commandId: command.id,
-    message: "Code queued for the Colab runtime.",
+    message: "Code queued for the runtime.",
   });
 });
 
@@ -80,10 +99,10 @@ router.post("/runtime/interrupt", (req, res): void => {
   }
   const status = getRuntimeStatus();
   if (status.sessionId !== parsed.data.sessionId || status.state === "offline") {
-    res.status(409).json({ error: "No connected Colab runtime." });
+    res.status(409).json({ error: "No connected runtime." });
     return;
   }
-  addEvent("system", "Interrupt requested. Stop the running cell in Colab if it does not stop automatically.", null);
+  addEvent("system", "Interrupt requested. Stop the running cell in the runtime if it does not stop automatically.", null);
   res.status(202).json({
     accepted: true,
     commandId: "interrupt",
@@ -149,91 +168,40 @@ router.get("/colab/commands", (req, res): void => {
   res.json({ commands: takeCommands() });
 });
 
+// CC R2 assistant chat — keys are server-side; the client never sends an API key.
 router.post("/assistant/chat", async (req, res): Promise<void> => {
+  if (!requireSeat(req, res)) return;
   const parsed = SendAssistantMessageBody.safeParse(req.body);
   if (!parsed.success) {
     invalid(res, parsed.error.message);
     return;
   }
-
-  const { provider, apiKey, model, message, sessionId, execute } = parsed.data;
-  const system =
-    "You are a careful Python assistant for Google Colab. Reply with a concise explanation and, when code is useful, include exactly one Python code block. Never include shell commands that delete data or expose secrets. Prefer pandas, matplotlib, and standard Python. The user must explicitly confirm before code execution.";
-  let reply = "";
-  let code: string | null = null;
-
+  const { message, execute, sessionId, preference } = parsed.data;
+  let result;
   try {
-    if (provider === "gemini") {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: `${system}\n\n${message}` }] }],
-          generationConfig: { temperature: 0.2 },
-        }),
-      });
-      const data = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-      if (!response.ok) throw new Error("Gemini request was rejected.");
-      reply = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
-    } else if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 1800,
-          system,
-          messages: [{ role: "user", content: message }],
-        }),
-      });
-      const data = (await response.json()) as { content?: Array<{ text?: string }> };
-      if (!response.ok) throw new Error("Anthropic request was rejected.");
-      reply = data.content?.map((part) => part.text || "").join("") || "";
-    } else {
-      const endpoint =
-        provider === "openrouter"
-          ? "https://openrouter.ai/api/v1/chat/completions"
-          : "https://api.openai.com/v1/chat/completions";
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: message },
-          ],
-        }),
-      });
-      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      if (!response.ok) throw new Error("AI provider request was rejected.");
-      reply = data.choices?.[0]?.message?.content || "";
-    }
+    result = await routeChat(message, preference ?? "primary");
   } catch (error) {
-    req.log.warn({ err: error, provider, model }, "AI provider request failed");
-    res.status(502).json({ error: error instanceof Error ? error.message : "AI provider request failed." });
+    req.log.warn({ err: error }, "CC R2 chat failed");
+    res
+      .status(502)
+      .json({ error: error instanceof Error ? error.message : "CC R2 could not complete that request." });
     return;
   }
-
-  const codeMatch = reply.match(/```(?:python|py)?\s*([\s\S]*?)```/i);
-  if (codeMatch?.[1]) code = codeMatch[1].trim();
+  // Optionally auto-queue the generated code to the runtime (when not in safe mode).
   let commandId: string | null = null;
-  if (execute && code && sessionId) {
+  if (execute && result.code && sessionId) {
     const status = getRuntimeStatus();
     if (status.sessionId === sessionId && status.state !== "offline") {
-      commandId = queueCommand(code, "AI-generated command").id;
+      commandId = queueCommand(result.code, "CC R2-generated command").id;
     }
   }
-  res.json({ reply, code, commandId, provider, model });
+  res.json({
+    reply: result.reply,
+    code: result.code,
+    commandId,
+    provider: result.provider,
+    model: result.model,
+  });
 });
 
 export default router;

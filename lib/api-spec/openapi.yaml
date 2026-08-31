@@ -44,7 +44,7 @@ paths:
     post:
       operationId: createRuntimeBootstrap
       tags: [runtime]
-      summary: Create a temporary Colab connector session
+      summary: Create a temporary Colab/Kaggle connector session
       requestBody:
         required: true
         content:
@@ -198,7 +198,7 @@ paths:
     post:
       operationId: sendAssistantMessage
       tags: [assistant]
-      summary: Ask an AI provider to interpret a task
+      summary: Ask the CC R2 agent to interpret a task
       requestBody:
         required: true
         content:
@@ -212,6 +212,143 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AssistantResponse"
+  /assistant/chat/thread:
+    get:
+      operationId: getChatThread
+      tags: [assistant]
+      summary: Get the current chat thread
+      responses:
+        "200":
+          description: Chat thread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatThreadResponse"
+  /occupancy:
+    get:
+      operationId: getOccupancy
+      tags: [runtime]
+      summary: Get single-user occupancy state
+      responses:
+        "200":
+          description: Occupancy state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OccupancyState"
+  /memory:
+    get:
+      operationId: getMemory
+      tags: [assistant]
+      summary: Get the session memory (messages, plan, decisions, points, tasks)
+      responses:
+        "200":
+          description: Memory summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySummary"
+  /memory/plan:
+    post:
+      operationId: addPlanItem
+      tags: [assistant]
+      summary: Add a plan item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanItemInput"
+      responses:
+        "201":
+          description: Plan item added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanItem"
+    delete:
+      operationId: clearPlan
+      tags: [assistant]
+      summary: Clear the plan
+      responses:
+        "200":
+          description: Plan cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySummary"
+  /memory/plan/{id}/toggle:
+    post:
+      operationId: togglePlanItem
+      tags: [assistant]
+      summary: Toggle a plan item's done state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated plan item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanItem"
+  /memory/points:
+    post:
+      operationId: addPoint
+      tags: [assistant]
+      summary: Add an important point
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanItemInput"
+      responses:
+        "201":
+          description: Point added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedItem"
+  /memory/decisions:
+    post:
+      operationId: addDecision
+      tags: [assistant]
+      summary: Record a decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanItemInput"
+      responses:
+        "201":
+          description: Decision added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedItem"
+  /projects/save:
+    post:
+      operationId: saveProject
+      tags: [assistant]
+      summary: Save the current project to GitHub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSaveInput"
+      responses:
+        "201":
+          description: Project saved to GitHub
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSaveResponse"
 components:
   schemas:
     HealthStatus:
@@ -228,6 +365,9 @@ components:
           type: string
           minLength: 1
           maxLength: 80
+        target:
+          type: string
+          enum: [colab, kaggle]
       required:
         - label
     SessionInput:
@@ -248,6 +388,9 @@ components:
           type: ["string", "null"]
         label:
           type: ["string", "null"]
+        target:
+          type: ["string", "null"]
+          enum: [colab, kaggle, null]
         connectedAt:
           type: ["string", "null"]
         lastSeenAt:
@@ -256,7 +399,7 @@ components:
           type: number
         pythonVersion:
           type: ["string", "null"]
-      required: [state, sessionId, label, connectedAt, lastSeenAt, queuedCommands, pythonVersion]
+      required: [state, sessionId, label, target, connectedAt, lastSeenAt, queuedCommands, pythonVersion]
     BootstrapResponse:
       type: object
       properties:
@@ -385,20 +528,12 @@ components:
           type: string
           minLength: 1
           maxLength: 12000
-        provider:
+        preference:
           type: string
-          enum: [openai, gemini, anthropic, openrouter, custom]
-        apiKey:
-          type: string
-          minLength: 1
-          maxLength: 500
-        model:
-          type: string
-          minLength: 1
-          maxLength: 120
+          enum: [primary, fast]
         execute:
           type: boolean
-      required: [message, provider, apiKey, model, execute]
+      required: [message, execute]
     AssistantResponse:
       type: object
       properties:
@@ -413,4 +548,124 @@ components:
         model:
           type: string
       required: [reply, code, commandId, provider, model]
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        code:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, role, content, code, createdAt]
+    ChatThreadResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+      required: [messages]
+    MemorySummary:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        plan:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanItem"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedItem"
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedItem"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectTask"
+      required: [messages, plan, decisions, points, tasks]
+    PlanItem:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        done:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, text, done, createdAt]
+    NamedItem:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        createdAt:
+          type: string
+      required: [id, text, createdAt]
+    ProjectTask:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        githubRepo:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, githubRepo, createdAt, updatedAt]
+    OccupancyState:
+      type: object
+      properties:
+        busy:
+          type: boolean
+        ownerId:
+          type: ["string", "null"]
+      required: [busy, ownerId]
+    ProjectSaveInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+      required: [name]
+    ProjectSaveResponse:
+      type: object
+      properties:
+        repo:
+          type: string
+        commitSha:
+          type: string
+        taskId:
+          type: string
+      required: [repo, commitSha, taskId]
+    PlanItemInput:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 500
+      required: [text]
 

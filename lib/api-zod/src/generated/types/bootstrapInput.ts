@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BootstrapInputTarget } from './bootstrapInputTarget';
 
 export interface BootstrapInput {
   /**
@@ -12,4 +13,5 @@ export interface BootstrapInput {
      * @maxLength 80
      */
   label: string;
+  target?: BootstrapInputTarget;
 }

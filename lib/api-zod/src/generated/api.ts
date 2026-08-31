@@ -24,6 +24,7 @@ export const GetRuntimeStatusResponse = zod.object({
   "state": zod.enum(['offline', 'waiting', 'connected', 'busy', 'error']),
   "sessionId": zod.string().nullable(),
   "label": zod.string().nullable(),
+  "target": zod.union([zod.literal('colab'),zod.literal('kaggle'),zod.literal(null)]).nullable(),
   "connectedAt": zod.string().nullable(),
   "lastSeenAt": zod.string().nullable(),
   "queuedCommands": zod.number(),
@@ -32,14 +33,15 @@ export const GetRuntimeStatusResponse = zod.object({
 
 
 /**
- * @summary Create a temporary Colab connector session
+ * @summary Create a temporary Colab/Kaggle connector session
  */
 export const createRuntimeBootstrapBodyLabelMax = 80;
 
 
 
 export const CreateRuntimeBootstrapBody = zod.object({
-  "label": zod.string().min(1).max(createRuntimeBootstrapBodyLabelMax)
+  "label": zod.string().min(1).max(createRuntimeBootstrapBodyLabelMax),
+  "target": zod.enum(['colab', 'kaggle']).optional()
 })
 
 export const CreateRuntimeBootstrapResponse = zod.object({
@@ -65,6 +67,7 @@ export const DisconnectRuntimeResponse = zod.object({
   "state": zod.enum(['offline', 'waiting', 'connected', 'busy', 'error']),
   "sessionId": zod.string().nullable(),
   "label": zod.string().nullable(),
+  "target": zod.union([zod.literal('colab'),zod.literal('kaggle'),zod.literal(null)]).nullable(),
   "connectedAt": zod.string().nullable(),
   "lastSeenAt": zod.string().nullable(),
   "queuedCommands": zod.number(),
@@ -150,6 +153,7 @@ export const ConnectColabRuntimeResponse = zod.object({
   "state": zod.enum(['offline', 'waiting', 'connected', 'busy', 'error']),
   "sessionId": zod.string().nullable(),
   "label": zod.string().nullable(),
+  "target": zod.union([zod.literal('colab'),zod.literal('kaggle'),zod.literal(null)]).nullable(),
   "connectedAt": zod.string().nullable(),
   "lastSeenAt": zod.string().nullable(),
   "queuedCommands": zod.number(),
@@ -198,22 +202,16 @@ export const GetColabCommandsResponse = zod.object({
 
 
 /**
- * @summary Ask an AI provider to interpret a task
+ * @summary Ask the CC R2 agent to interpret a task
  */
 export const sendAssistantMessageBodyMessageMax = 12000;
-
-export const sendAssistantMessageBodyApiKeyMax = 500;
-
-export const sendAssistantMessageBodyModelMax = 120;
 
 
 
 export const SendAssistantMessageBody = zod.object({
   "sessionId": zod.string().nullish(),
   "message": zod.string().min(1).max(sendAssistantMessageBodyMessageMax),
-  "provider": zod.enum(['openai', 'gemini', 'anthropic', 'openrouter', 'custom']),
-  "apiKey": zod.string().min(1).max(sendAssistantMessageBodyApiKeyMax),
-  "model": zod.string().min(1).max(sendAssistantMessageBodyModelMax),
+  "preference": zod.enum(['primary', 'fast']).optional(),
   "execute": zod.boolean()
 })
 
@@ -223,6 +221,194 @@ export const SendAssistantMessageResponse = zod.object({
   "commandId": zod.string().nullable(),
   "provider": zod.string(),
   "model": zod.string()
+})
+
+
+/**
+ * @summary Get the current chat thread
+ */
+export const GetChatThreadResponse = zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant', 'system']),
+  "content": zod.string(),
+  "code": zod.string().nullable(),
+  "createdAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Get single-user occupancy state
+ */
+export const GetOccupancyResponse = zod.object({
+  "busy": zod.boolean(),
+  "ownerId": zod.string().nullable()
+})
+
+
+/**
+ * @summary Get the session memory (messages, plan, decisions, points, tasks)
+ */
+export const GetMemoryResponse = zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant', 'system']),
+  "content": zod.string(),
+  "code": zod.string().nullable(),
+  "createdAt": zod.string()
+})),
+  "plan": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "done": zod.boolean(),
+  "createdAt": zod.string()
+})),
+  "decisions": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})),
+  "points": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})),
+  "tasks": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "githubRepo": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Add a plan item
+ */
+export const addPlanItemBodyTextMax = 500;
+
+
+
+export const AddPlanItemBody = zod.object({
+  "text": zod.string().min(1).max(addPlanItemBodyTextMax)
+})
+
+export const AddPlanItemResponse = zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "done": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Clear the plan
+ */
+export const ClearPlanResponse = zod.object({
+  "messages": zod.array(zod.object({
+  "id": zod.string(),
+  "role": zod.enum(['user', 'assistant', 'system']),
+  "content": zod.string(),
+  "code": zod.string().nullable(),
+  "createdAt": zod.string()
+})),
+  "plan": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "done": zod.boolean(),
+  "createdAt": zod.string()
+})),
+  "decisions": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})),
+  "points": zod.array(zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})),
+  "tasks": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "githubRepo": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Toggle a plan item's done state
+ */
+export const TogglePlanItemParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const TogglePlanItemResponse = zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "done": zod.boolean(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Add an important point
+ */
+export const addPointBodyTextMax = 500;
+
+
+
+export const AddPointBody = zod.object({
+  "text": zod.string().min(1).max(addPointBodyTextMax)
+})
+
+export const AddPointResponse = zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Record a decision
+ */
+export const addDecisionBodyTextMax = 500;
+
+
+
+export const AddDecisionBody = zod.object({
+  "text": zod.string().min(1).max(addDecisionBodyTextMax)
+})
+
+export const AddDecisionResponse = zod.object({
+  "id": zod.string(),
+  "text": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Save the current project to GitHub
+ */
+export const saveProjectBodyNameMax = 100;
+
+export const saveProjectBodyDescriptionMax = 500;
+
+
+
+export const SaveProjectBody = zod.object({
+  "name": zod.string().min(1).max(saveProjectBodyNameMax),
+  "description": zod.string().max(saveProjectBodyDescriptionMax).optional()
+})
+
+export const SaveProjectResponse = zod.object({
+  "repo": zod.string(),
+  "commitSha": zod.string(),
+  "taskId": zod.string()
 })
 
 

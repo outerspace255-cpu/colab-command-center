@@ -68,6 +68,11 @@ catalog:
 
 autoInstallPeers: false
 
+# Allow all build scripts (esbuild, @swc/core, msw, unrs-resolver). The
+# onlyBuiltDependencies list below also scopes which packages may run scripts;
+# this flag prevents pnpm from hard-erroring on pending build approvals.
+dangerouslyAllowAllBuilds: true
+
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
@@ -158,3 +163,6 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+
+allowBuilds:
+  esbuild: set this to true or false

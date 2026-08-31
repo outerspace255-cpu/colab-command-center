@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RuntimeStatusState } from './runtimeStatusState';
+import type { RuntimeStatusTarget } from './runtimeStatusTarget';
 
 export interface RuntimeStatus {
   state: RuntimeStatusState;
@@ -13,6 +14,8 @@ export interface RuntimeStatus {
   sessionId: string | null;
   /** @nullable */
   label: string | null;
+  /** @nullable */
+  target: RuntimeStatusTarget;
   /** @nullable */
   connectedAt: string | null;
   /** @nullable */
