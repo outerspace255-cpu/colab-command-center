@@ -50,10 +50,16 @@ function nvidiaModels(): string[] {
 }
 
 export function loadConfig(): AppConfig {
-  const githubToken = (process.env["GITHUB_TOKEN"] ?? "").trim();
+  const githubToken = (
+    process.env["GITHUB_TOKEN"] ??
+    process.env["GitHub_KEY"] ??
+    ""
+  ).trim();
   if (!githubToken) {
     // Soft warn: github save won't work, but the app should still boot.
-    console.warn("[config] GITHUB_TOKEN not set — project save to GitHub disabled.");
+    console.warn(
+      "[config] GitHub secret not set — project save to GitHub disabled.",
+    );
   }
 
   return {
@@ -73,6 +79,7 @@ export function loadConfig(): AppConfig {
         keys: splitKeys(
           process.env["GEMINI_API_KEY_1"],
           process.env["GEMINI_API_KEY_2"],
+          process.env["GEMINI_KEY"],
         ),
         perKeyLimitPerMinute: int(process.env["GEMINI_RPM"], 14),
         model: (process.env["GEMINI_MODEL"] ?? "gemini-3.5-flash").trim(),
@@ -83,6 +90,7 @@ export function loadConfig(): AppConfig {
         keys: splitKeys(
           process.env["DEEPSEEK_API_KEY_1"],
           process.env["DEEPSEEK_API_KEY_2"],
+          process.env["OPENAI_API_KEY"],
         ),
         perKeyLimitPerMinute: int(process.env["DEEPSEEK_RPM"], 10),
         model: (process.env["DEEPSEEK_MODEL"] ?? "glm-5.2").trim(),
