@@ -190,7 +190,7 @@ router.post("/assistant/chat", async (req, res): Promise<void> => {
 
   let result;
   try {
-    result = await routeChat(safeMessage, preference ?? "primary");
+    result = await routeChat(safeMessage, preference ?? "ensemble");
   } catch (error) {
     req.log.warn({ err: error }, "CC R2 chat failed");
     res
