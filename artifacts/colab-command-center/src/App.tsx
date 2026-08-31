@@ -94,6 +94,8 @@ function Shell() {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: health } = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30000 } });
+  const { data: occupancy } = useGetOccupancy({ query: { queryKey: getGetOccupancyQueryKey(), refetchInterval: 5000 } });
+  if (occupancy?.busy && occupancy.allowed === false) return <BusyScreen />;
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
       <aside className={`fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-300 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -249,7 +251,7 @@ function CommandCenter() {
 }
 
 function BusyScreen() {
-  return <div className="animate-rise flex min-h-[60vh] flex-col items-center justify-center text-center"><div className="grid size-16 place-items-center rounded-2xl bg-accent/10 text-accent"><Loader2 size={30} className="animate-spin"/></div><h2 className="mt-6 font-display text-3xl tracking-tight">System is currently busy</h2><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">Another session owns the workspace right now (single-user lock). Your turn begins as soon as the active runtime disconnects. Please wait a moment and refresh.</p><Link href="/" data-testid="link-busy-retry" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground"><RefreshCw size={14}/> Retry</Link></div>;
+  return <div className="animate-rise flex min-h-[70vh] flex-col items-center justify-center px-6 text-center" data-testid="status-app-busy"><div className="grid size-16 place-items-center rounded-2xl bg-accent/10 text-accent"><Loader2 size={30} className="animate-spin"/></div><h2 className="mt-6 max-w-xl font-display text-2xl tracking-tight">system is currently busy. please try again later.</h2><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">This private workspace allows one active visitor at a time. The current session is still using the control plane.</p><Link href="/" data-testid="link-busy-retry" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground"><RefreshCw size={14}/> Retry</Link></div>;
 }
 
 function RuntimeBanner({ status, loading, onConnect }: { status?: RuntimeStatus; loading: boolean; onConnect: () => void }) {
