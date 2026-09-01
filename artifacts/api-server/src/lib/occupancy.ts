@@ -60,6 +60,11 @@ function expireSeatIfNeeded(): void {
   }
 }
 
+export function isSeatBusy(): boolean {
+  expireSeatIfNeeded();
+  return appSeat !== null;
+}
+
 export function claimSeat(clientId: string): boolean {
   expireSeatIfNeeded();
   if (!appSeat) {
