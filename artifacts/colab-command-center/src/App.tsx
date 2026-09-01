@@ -94,7 +94,9 @@ function Shell() {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: health } = useHealthCheck({ query: { queryKey: getHealthCheckQueryKey(), refetchInterval: 30000 } });
-  const { data: occupancy } = useGetOccupancy({ query: { queryKey: getGetOccupancyQueryKey(), refetchInterval: 5000 } });
+  const { data: occupancy, isLoading: occupancyLoading, isError: occupancyError, refetch: refetchOccupancy } = useGetOccupancy({ query: { queryKey: getGetOccupancyQueryKey(), refetchInterval: 5000 } });
+  if (occupancyError) return <AccessErrorScreen onRetry={() => refetchOccupancy()} />;
+  if (occupancyLoading || !occupancy) return <AccessLoadingScreen />;
   if (occupancy?.busy && occupancy.allowed === false) return <BusyScreen />;
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -252,6 +254,14 @@ function CommandCenter() {
 
 function BusyScreen() {
   return <div className="animate-rise flex min-h-[70vh] flex-col items-center justify-center px-6 text-center" data-testid="status-app-busy"><div className="grid size-16 place-items-center rounded-2xl bg-accent/10 text-accent"><Loader2 size={30} className="animate-spin"/></div><h2 className="mt-6 max-w-xl font-display text-2xl tracking-tight">system is currently busy. please try again later.</h2><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">This private workspace allows one active visitor at a time. The current session is still using the control plane.</p><Link href="/" data-testid="link-busy-retry" className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground"><RefreshCw size={14}/> Retry</Link></div>;
+}
+
+function AccessLoadingScreen() {
+  return <div className="flex min-h-[70vh] items-center justify-center text-sm text-muted-foreground" data-testid="status-access-loading"><Loader2 size={18} className="mr-2 animate-spin text-primary"/>Checking workspace access…</div>;
+}
+
+function AccessErrorScreen({ onRetry }: { onRetry: () => void }) {
+  return <div className="flex min-h-[70vh] flex-col items-center justify-center text-center" data-testid="status-access-error"><h2 className="font-display text-2xl tracking-tight">Could not check workspace access</h2><button onClick={onRetry} data-testid="button-retry-access" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground"><RefreshCw size={14}/> Retry</button></div>;
 }
 
 function RuntimeBanner({ status, loading, onConnect }: { status?: RuntimeStatus; loading: boolean; onConnect: () => void }) {
