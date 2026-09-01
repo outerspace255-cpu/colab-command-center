@@ -23,6 +23,7 @@ export * from './colabEventInputType';
 export * from './connectInput';
 export * from './executeInput';
 export * from './executionResponse';
+export * from './externalHealthStatus';
 export * from './getColabCommandsParams';
 export * from './getRuntimeEventsParams';
 export * from './healthStatus';

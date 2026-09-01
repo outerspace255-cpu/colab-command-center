@@ -31,6 +31,7 @@ import type {
   ConnectInput,
   ExecuteInput,
   ExecutionResponse,
+  ExternalHealthStatus,
   GetColabCommandsParams,
   GetRuntimeEventsParams,
   HealthStatus,
@@ -969,6 +970,231 @@ export function useGetChatThread<TData = Awaited<ReturnType<typeof getChatThread
 
 
 
+
+export const getGetExternalHealthUrl = () => {
+
+
+
+
+  return `/api/v1/health`
+}
+
+/**
+ * @summary Check the authenticated external API
+ */
+export const getExternalHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<ExternalHealthStatus> => {
+
+  return customFetch<ExternalHealthStatus>(getGetExternalHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetExternalHealthQueryKey = () => {
+    return [
+    `/api/v1/health`
+    ] as const;
+    }
+
+
+export const getGetExternalHealthQueryOptions = <TData = Awaited<ReturnType<typeof getExternalHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getExternalHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetExternalHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getExternalHealth>>> = ({ signal }) => getExternalHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getExternalHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetExternalHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getExternalHealth>>>
+export type GetExternalHealthQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Check the authenticated external API
+ */
+
+export function useGetExternalHealth<TData = Awaited<ReturnType<typeof getExternalHealth>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getExternalHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetExternalHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetExternalRuntimeStatusUrl = () => {
+
+
+
+
+  return `/api/v1/runtime/status`
+}
+
+/**
+ * @summary Get runtime status through the external API
+ */
+export const getExternalRuntimeStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<RuntimeStatus> => {
+
+  return customFetch<RuntimeStatus>(getGetExternalRuntimeStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetExternalRuntimeStatusQueryKey = () => {
+    return [
+    `/api/v1/runtime/status`
+    ] as const;
+    }
+
+
+export const getGetExternalRuntimeStatusQueryOptions = <TData = Awaited<ReturnType<typeof getExternalRuntimeStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getExternalRuntimeStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetExternalRuntimeStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getExternalRuntimeStatus>>> = ({ signal }) => getExternalRuntimeStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getExternalRuntimeStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetExternalRuntimeStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getExternalRuntimeStatus>>>
+export type GetExternalRuntimeStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get runtime status through the external API
+ */
+
+export function useGetExternalRuntimeStatus<TData = Awaited<ReturnType<typeof getExternalRuntimeStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getExternalRuntimeStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetExternalRuntimeStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSendExternalAssistantMessageUrl = () => {
+
+
+
+
+  return `/api/v1/assistant/chat`
+}
+
+/**
+ * @summary Ask CC+ through the authenticated external API
+ */
+export const sendExternalAssistantMessage = async (assistantInput: AssistantInput, options?: Parameters<typeof customFetch>[1]): Promise<AssistantResponse> => {
+
+  return customFetch<AssistantResponse>(getSendExternalAssistantMessageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(assistantInput)
+  }
+);}
+
+
+
+
+
+export const getSendExternalAssistantMessageMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendExternalAssistantMessage>>, TError,{data: BodyType<AssistantInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendExternalAssistantMessage>>, TError,{data: BodyType<AssistantInput>}, TContext> => {
+
+const mutationKey = ['sendExternalAssistantMessage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendExternalAssistantMessage>>, {data: BodyType<AssistantInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  sendExternalAssistantMessage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendExternalAssistantMessageMutationResult = NonNullable<Awaited<ReturnType<typeof sendExternalAssistantMessage>>>
+    export type SendExternalAssistantMessageMutationBody = BodyType<AssistantInput>
+    export type SendExternalAssistantMessageMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Ask CC+ through the authenticated external API
+ */
+export const useSendExternalAssistantMessage = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendExternalAssistantMessage>>, TError,{data: BodyType<AssistantInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendExternalAssistantMessage>>,
+        TError,
+        {data: BodyType<AssistantInput>},
+        TContext
+      > => {
+      return useMutation(getSendExternalAssistantMessageMutationOptions(options));
+    }
 
 export const getGetOccupancyUrl = () => {
 

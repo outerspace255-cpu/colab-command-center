@@ -1,6 +1,7 @@
 // AI orchestration for CC+. The default ensemble runs the DeepSeek lead and
 // Gemini specialist in parallel, then asks the DeepSeek lead to synthesize one
-// final answer. Providers are never silent fallbacks for one another.
+// final answer. If one provider fails, the healthy provider is used explicitly
+// as a fallback so a transient provider error does not block the user.
 //
 // All keys live server-side; the client never sees them. The "provider"/"model"
 // returned to the caller is a logical role label, NEVER the real provider/model
@@ -67,6 +68,14 @@ function extractCode(reply: string): string | null {
   return m?.[1] ? m[1].trim() : null;
 }
 
+function safeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(
+    /(?:AIza[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})/g,
+    "[redacted]",
+  );
+}
+
 // --- OpenAI-compatible completion (DeepSeek + NVIDIA) ---
 async function openaiChat(
   rt: PoolRuntime,
@@ -118,39 +127,52 @@ async function geminiChat(
   system: string,
   turns: ChatTurn[],
 ): Promise<{ reply: string; model: string }> {
-  const key = rt.pool.acquire();
-  if (!key) throw new Error("No API key available in pool.");
-  const model = rt.cfg.model;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model,
-  )}:generateContent?key=${encodeURIComponent(key)}`;
-  // Gemini has no native system role; fold system into first user turn.
-  const contents = turns.map((t, i) => ({
+  const models = [
+    ...new Set([
+      rt.cfg.model,
+      ...(rt.cfg.fallbackModels ?? []),
+      "gemini-3.6-flash",
+    ]),
+  ].filter(Boolean);
+  let lastErr: unknown;
+  const contents = turns.map((t) => ({
     role: t.role === "assistant" ? "model" : "user",
-    parts: [{ text: i === 0 && t.role === "user" ? `${system}\n\n${t.content}` : t.content }],
+    parts: [{ text: t.content }],
   }));
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      contents,
-      systemInstruction: { parts: [{ text: system }] },
-      generationConfig: { temperature: 0.2 },
-    }),
-  });
-  const data = (await response.json().catch(() => null)) as
-    | { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; error?: { message?: string } }
-    | null;
-  if (!response.ok) {
-    throw new Error(data?.error?.message ?? "Gemini rejected request.");
+  for (const model of models) {
+    const key = rt.pool.acquire();
+    if (!key) {
+      lastErr = new Error("No API key available in pool.");
+      break;
+    }
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model,
+    )}:generateContent?key=${encodeURIComponent(key)}`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents,
+        systemInstruction: { parts: [{ text: system }] },
+        generationConfig: { temperature: 0.2 },
+      }),
+    });
+    const data = (await response.json().catch(() => null)) as
+      | { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; error?: { message?: string } }
+      | null;
+    if (!response.ok) {
+      lastErr = new Error(data?.error?.message ?? `Gemini rejected request (${response.status}).`);
+      continue;
+    }
+    const reply =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text || "")
+        .join("")
+        .trim() || "";
+    if (reply) return { reply, model };
+    lastErr = new Error("Empty Gemini response.");
   }
-  const reply =
-    data?.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text || "")
-      .join("")
-      .trim() || "";
-  if (!reply) throw new Error("Empty Gemini response.");
-  return { reply, model };
+  throw lastErr instanceof Error ? lastErr : new Error("Gemini request failed.");
 }
 
 async function callPool(
@@ -185,7 +207,20 @@ export async function routeChat(
     if (preference === "primary") {
       const runtime = runtimeFor("deepseek");
       if (!runtime) throw new Error("The lead agent is not configured.");
-      const result = await callPool(runtime, system, turns);
+      let result;
+      try {
+        result = await callPool(runtime, system, turns);
+      } catch (primaryError) {
+        const fallback = runtimeFor("gemini");
+        if (!fallback) throw primaryError;
+        console.warn("[ai-router] lead failed; using Gemini fallback", {
+          error: safeErrorMessage(primaryError),
+        });
+        result = await callPool(fallback, system, turns);
+        const code = extractCode(result.reply);
+        addMessage("assistant", result.reply, code);
+        return { reply: result.reply, code, provider: "fallback", model: "cc-r2-fallback" };
+      }
       const code = extractCode(result.reply);
       addMessage("assistant", result.reply, code);
       return { reply: result.reply, code, provider: "primary", model: "cc-r2" };
@@ -194,7 +229,20 @@ export async function routeChat(
     if (preference === "fast") {
       const runtime = runtimeFor("gemini");
       if (!runtime) throw new Error("The specialist agent is not configured.");
-      const result = await callPool(runtime, system, turns);
+      let result;
+      try {
+        result = await callPool(runtime, system, turns);
+      } catch (fastError) {
+        const fallback = runtimeFor("deepseek");
+        if (!fallback) throw fastError;
+        console.warn("[ai-router] Gemini failed; using lead fallback", {
+          error: safeErrorMessage(fastError),
+        });
+        result = await callPool(fallback, system, turns);
+        const code = extractCode(result.reply);
+        addMessage("assistant", result.reply, code);
+        return { reply: result.reply, code, provider: "fallback", model: "cc-r2-fallback" };
+      }
       const code = extractCode(result.reply);
       addMessage("assistant", result.reply, code);
       return { reply: result.reply, code, provider: "fast", model: "cc-r2" };
@@ -213,6 +261,31 @@ export async function routeChat(
       callPool(gemini, system, turns),
     ]);
     if (lead.status === "rejected" || specialist.status === "rejected") {
+      console.warn("[ai-router] synchronized provider failure", {
+        lead: lead.status === "rejected" ? safeErrorMessage(lead.reason) : "ok",
+        specialist:
+          specialist.status === "rejected"
+            ? safeErrorMessage(specialist.reason)
+            : "ok",
+      });
+      if (lead.status === "fulfilled" || specialist.status === "fulfilled") {
+        const fallback =
+          lead.status === "fulfilled"
+            ? lead.value
+            : specialist.status === "fulfilled"
+              ? specialist.value
+              : null;
+        if (fallback) {
+          const code = extractCode(fallback.reply);
+          addMessage("assistant", fallback.reply, code);
+          return {
+            reply: fallback.reply,
+            code,
+            provider: "fallback",
+            model: "cc-r2-fallback",
+          };
+        }
+      }
       const failed = [
         lead.status === "rejected" ? "lead" : null,
         specialist.status === "rejected" ? "specialist" : null,
@@ -243,9 +316,20 @@ Specialist analysis:
 ${specialist.value.reply}
 
 Produce the final answer for the user now.`;
-    const final = await callPool(deepseek, synthesisSystem, [
-      { role: "user", content: synthesisPrompt },
-    ]);
+    let final;
+    try {
+      final = await callPool(deepseek, synthesisSystem, [
+        { role: "user", content: synthesisPrompt },
+      ]);
+    } catch (synthesisError) {
+      console.warn("[ai-router] synthesis failed; using specialist fallback", {
+        error: safeErrorMessage(synthesisError),
+      });
+      const fallbackReply = specialist.value.reply || lead.value.reply;
+      const code = extractCode(fallbackReply);
+      addMessage("assistant", fallbackReply, code);
+      return { reply: fallbackReply, code, provider: "fallback", model: "cc-r2-fallback" };
+    }
     const code = extractCode(final.reply);
     addMessage("assistant", final.reply, code);
     return { reply: final.reply, code, provider: "ensemble", model: "cc-r3" };

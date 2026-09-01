@@ -224,6 +224,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatThreadResponse"
+  /v1/health:
+    get:
+      operationId: getExternalHealth
+      tags: [external]
+      summary: Check the authenticated external API
+      security:
+        - ExternalApiKey: []
+      responses:
+        "200":
+          description: External API health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalHealthStatus"
+  /v1/runtime/status:
+    get:
+      operationId: getExternalRuntimeStatus
+      tags: [external]
+      summary: Get runtime status through the external API
+      security:
+        - ExternalApiKey: []
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatus"
+  /v1/assistant/chat:
+    post:
+      operationId: sendExternalAssistantMessage
+      tags: [external]
+      summary: Ask CC+ through the authenticated external API
+      security:
+        - ExternalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantInput"
+      responses:
+        "200":
+          description: Assistant response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantResponse"
   /occupancy:
     get:
       operationId: getOccupancy
@@ -350,6 +398,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectSaveResponse"
 components:
+  securitySchemes:
+    ExternalApiKey:
+      type: apiKey
+      in: header
+      name: X-CC-API-Key
   schemas:
     HealthStatus:
       type: object
@@ -358,6 +411,14 @@ components:
           type: string
       required:
         - status
+    ExternalHealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+      required: [status, service]
     BootstrapInput:
       type: object
       properties:

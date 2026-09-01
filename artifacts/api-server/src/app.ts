@@ -38,7 +38,11 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", (req, res, next): void => {
   // Health checks must remain public so platform monitors never claim the seat.
-  if (req.path === "/healthz" || req.path === "/occupancy") {
+  if (
+    req.path === "/healthz" ||
+    req.path === "/occupancy" ||
+    req.path.startsWith("/v1/")
+  ) {
     next();
     return;
   }

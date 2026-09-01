@@ -239,6 +239,53 @@ export const GetChatThreadResponse = zod.object({
 
 
 /**
+ * @summary Check the authenticated external API
+ */
+export const GetExternalHealthResponse = zod.object({
+  "status": zod.string(),
+  "service": zod.string()
+})
+
+
+/**
+ * @summary Get runtime status through the external API
+ */
+export const GetExternalRuntimeStatusResponse = zod.object({
+  "state": zod.enum(['offline', 'waiting', 'connected', 'busy', 'error']),
+  "sessionId": zod.string().nullable(),
+  "label": zod.string().nullable(),
+  "target": zod.union([zod.literal('colab'),zod.literal('kaggle'),zod.literal(null)]).nullable(),
+  "connectedAt": zod.string().nullable(),
+  "lastSeenAt": zod.string().nullable(),
+  "queuedCommands": zod.number(),
+  "pythonVersion": zod.string().nullable()
+})
+
+
+/**
+ * @summary Ask CC+ through the authenticated external API
+ */
+export const sendExternalAssistantMessageBodyMessageMax = 12000;
+
+export const sendExternalAssistantMessageBodyPreferenceDefault = `ensemble`;
+
+export const SendExternalAssistantMessageBody = zod.object({
+  "sessionId": zod.string().nullish(),
+  "message": zod.string().min(1).max(sendExternalAssistantMessageBodyMessageMax),
+  "preference": zod.enum(['ensemble', 'primary', 'fast']).default(sendExternalAssistantMessageBodyPreferenceDefault),
+  "execute": zod.boolean()
+})
+
+export const SendExternalAssistantMessageResponse = zod.object({
+  "reply": zod.string(),
+  "code": zod.string().nullable(),
+  "commandId": zod.string().nullable(),
+  "provider": zod.string(),
+  "model": zod.string()
+})
+
+
+/**
  * @summary Get single-user occupancy state
  */
 export const GetOccupancyResponse = zod.object({

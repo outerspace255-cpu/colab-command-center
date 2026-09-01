@@ -9,6 +9,11 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface ExternalHealthStatus {
+  status: string;
+  service: string;
+}
+
 export type BootstrapInputTarget = typeof BootstrapInputTarget[keyof typeof BootstrapInputTarget];
 
 

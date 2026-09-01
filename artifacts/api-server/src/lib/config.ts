@@ -22,7 +22,7 @@ export type PoolConfig = {
   /** Max requests per minute per key (sliding window). */
   perKeyLimitPerMinute: number;
   model: string;
-  /** For nvidia: fallback model chain. */
+  /** Optional provider-specific fallback model chain. */
   fallbackModels?: string[];
   /** OpenAI-compatible base URL (chat completions). Empty for gemini. */
   baseUrl: string;
@@ -31,6 +31,7 @@ export type PoolConfig = {
 export type AppConfig = {
   appName: string;
   occupancyLock: boolean;
+  externalApiKey: string;
   logLevel: string;
   github: { token: string; baseUrl: string };
   kaggle: { apiKey: string };
@@ -65,6 +66,11 @@ export function loadConfig(): AppConfig {
   return {
     appName: (process.env["APP_NAME"] ?? "CC+").trim(),
     occupancyLock: (process.env["APP_OCCUPANCY_LOCK"] ?? "true").trim() !== "false",
+    externalApiKey: (
+      process.env["CC_API_KEY"] ??
+      process.env["APP_API_KEY"] ??
+      ""
+    ).trim(),
     logLevel: (process.env["LOG_LEVEL"] ?? "info").trim(),
     github: {
       token: githubToken,
@@ -82,7 +88,11 @@ export function loadConfig(): AppConfig {
           process.env["GEMINI_KEY"],
         ),
         perKeyLimitPerMinute: int(process.env["GEMINI_RPM"], 14),
-        model: (process.env["GEMINI_MODEL"] ?? "gemini-3.5-flash").trim(),
+        model: (process.env["GEMINI_MODEL"] ?? "gemini-3.6-flash").trim(),
+        fallbackModels: (process.env["GEMINI_FALLBACK_MODELS"] ?? "")
+          .split(",")
+          .map((m) => m.trim())
+          .filter(Boolean),
         baseUrl: "",
       },
       deepseek: {
