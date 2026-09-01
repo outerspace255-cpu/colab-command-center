@@ -1,1 +1,3 @@
-- [GitHub PAT write permissions](github-pat-write-permissions.md) — fine-grained tokens need target-repo Contents read/write for Git and Contents API pushes.
+- [pnpm build-script policy](pnpm-build-script-policy.md) — avoid combining workspace-only and environment-level dependency build allowlists.
+- [AI orchestration policy](ai-orchestration-policy.md) — parallel specialist analysis should end in explicit synthesis, never silent provider substitution.
+- [Single-user lease handshake](single-user-lease-handshake.md) — establish the browser client cookie before mounting protected page queries to avoid first-load self-collisions.
